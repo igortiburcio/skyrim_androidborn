@@ -9,9 +9,10 @@ Skyrim Androidborn is a fork of
 independently. This repository contains no game code or data: you need your
 own copy of the PC game.
 
-Tested on a **Retroid Pocket G2** (Adreno A22, Android 15).
+Tested on a **Retroid Pocket G2** (Adreno A22, Android 15). Also tested on a
+**Xiaomi 15T** (Mali-G720, Android 15) with the PanVK driver.
 
-Current version: **0.1.3** — see [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.1.4** — see [CHANGELOG.md](CHANGELOG.md).
 
 ## Screenshots
 
@@ -107,6 +108,14 @@ Optional switches: create an empty file with one of these names in
 
 If the game does not start, check that `TESV.exe`, `TESV_unpacked.exe`, the
 three DLLs and the `Data` folder are all in the folder you selected.
+
+### Mali GPUs
+
+The stock Mali Vulkan driver crashes while Skyrim compiles its shaders, so the
+game closes shortly after Play. Install a PanVK driver zip in **GPU driver** and
+select it before playing. Tested with `mali-panvk-27.0.0-devel-r10`
+(`libvulkan_panfrost.so`); newer PanVK builds from the emulator community should
+also work. The launcher installs the same driver zips the emulators use.
 
 ## Building
 

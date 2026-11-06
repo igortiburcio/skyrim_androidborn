@@ -94,6 +94,11 @@ static unsigned long long g_silence_frames, g_dry_passes;
 static unsigned long long g_pass_window_max_us;
 static uint32_t g_qmin = ~0u, g_qmax;
 static uint64_t g_stat_next_us, g_mix_start_us, g_q_ignore_until;
+/* The device can take a while to start draining (cold Android audio HAL,
+ * heavy startup on a custom Vulkan driver). Never close it for that: the
+ * soundtrack has to come back as soon as the device catches up. */
+static uint64_t g_drain_stall_us;
+static int g_drain_warned;
 
 static int audiodump_enabled(void) {
     if (g_audiodump < 0) {
@@ -749,11 +754,8 @@ static void *engine_main(void *arg) {
     g_stat_next_us = next + 5000000;
     for (;;) {
         if (g_dev) {
-            /* Keep at least four device buffers queued. SDL's OpenSL backend
-             * consumes one spec.size chunk per callback and pads the rest
-             * with silence when the queue is short (SDL_audio.c:569); with
-             * samples=2048 that chunk is 42.7 ms, so a 40 ms queue produced a
-             * dropout every callback. */
+            /* Keep at least four device buffers queued so the mixer never runs
+             * dry between passes. */
             Uint32 q0 = SDL_GetQueuedAudioSize(g_dev), q;
             uint32_t qpre = q0;
             uint32_t target = g_dev_buf_bytes ? 4 * g_dev_buf_bytes
@@ -766,13 +768,37 @@ static void *engine_main(void *arg) {
             }
             uint64_t t0 = now_us();
             while ((q = SDL_GetQueuedAudioSize(g_dev)) > target) {
-                if (q < q0) { q0 = q; t0 = now_us(); }
-                else if (now_us() - t0 > 200000) {
-                    LOG("xaudio2: audio device stalled, mixing silently");
-                    SDL_CloseAudioDevice(g_dev);
-                    g_dev = 0;
-                    next = now_us();
-                    break;
+                if (q < q0) {
+                    q0 = q;
+                    t0 = now_us();
+                    if (g_drain_warned) {
+                        LOG("xaudio2: audio device draining again after %llums",
+                            (unsigned long long)(now_us() - g_drain_stall_us) / 1000);
+                        g_drain_warned = 0;
+                        g_drain_stall_us = 0;
+                    }
+                    continue;
+                }
+                if (now_us() - t0 > 200000) {
+                    if (!g_drain_warned) {
+                        g_drain_warned = 1;
+                        g_drain_stall_us = t0;
+                        LOG("xaudio2: audio device not draining (%u B queued), waiting", q);
+                    }
+                    /* 200 ms without the queue moving used to close the device
+                     * for good, which cost the whole session's sound on phones
+                     * whose audio device starts slowly. Keep it open and wait;
+                     * only drop the backlog after 5 s so the mixer never blocks
+                     * forever on a device that really died. */
+                    if (now_us() - t0 > 5000000) {
+                        LOG("xaudio2: audio device stuck for %llums, clearing the queue",
+                            (unsigned long long)(now_us() - t0) / 1000);
+                        SDL_ClearQueuedAudio(g_dev);
+                        q0 = 0;
+                        t0 = now_us();
+                        g_drain_warned = 0;
+                        g_drain_stall_us = 0;
+                    }
                 }
                 usleep(1000);
             }
@@ -814,20 +840,14 @@ static void *engine_main(void *arg) {
 static void engine_start_thread(void) {
     if (g_thread_started) return;
     g_thread_started = 1;
-    /* The 0.30 runtime uses OpenSL ES at 48 kHz (AAudio adds latency). An
-     * empty save/stockaudio.txt restores SDL's default backend. */
-    {
-        extern char g_save_dir[];
-        char path[1100];
-        snprintf(path, sizeof path, "%s/stockaudio.txt", g_save_dir);
-        if (access(path, F_OK) == 0) {
-            LOG("audio: SDL default backend (stockaudio override)");
-        } else {
-            SDL_SetHint(SDL_HINT_AUDIODRIVER, "openslES");
-            LOG("audio: openslES @ %d Hz (save/stockaudio.txt to restore SDL default)", g_rate);
-        }
-    }
+    /* SDL's audio backend is chosen when the subsystem is initialised in
+     * platform_init(), before the game creates its mastering voice, so setting
+     * SDL_HINT_AUDIODRIVER here had no effect. Log the backend that is really
+     * in use (AAudio on Android; it accepts the float format the mixer queues,
+     * while SDL's OpenSL ES backend only takes S16). */
     if (!SDL_WasInit(SDL_INIT_AUDIO)) SDL_InitSubSystem(SDL_INIT_AUDIO);
+    const char *backend = SDL_GetCurrentAudioDriver();
+    LOG("audio: backend %s @ %d Hz", backend ? backend : "?", g_rate);
     SDL_AudioSpec want = {0}, have;
     want.freq = g_rate;
     want.format = AUDIO_F32SYS;

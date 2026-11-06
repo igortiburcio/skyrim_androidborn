@@ -11,6 +11,19 @@ Skyrim Androidborn is a fork of
 [ttom795/Skyrim_Android](https://github.com/ttom795/Skyrim_Android), developed
 independently.
 
+## 0.1.4 — 2026-11-06
+
+Audio fix.
+
+### Audio
+- [Slow audio start no longer mutes the session — music and effects work on Mali with PanVK]
+  The mixer waits for the audio device and recovers instead of staying silent
+  until the next launch.
+
+### Notes
+Tested on a Retroid Pocket G2 (Adreno A22, Android 15). A Mali-G720 (Xiaomi 15T,
+Android 15) needs the PanVK driver; see the README.
+
 ## 0.1.3 — 2026-11-06
 
 Launcher icon.
