@@ -138,7 +138,7 @@ void update() {
             g_look_x = f.ax;
             g_look_y = f.ay;
             rx = (f.x - f.ax) * g_aspect / LOOK_R;
-            ry = -(f.y - f.ay) / LOOK_R;
+            ry = (f.y - f.ay) / LOOK_R;  /* screen space; the game takes -y */
             float l = std::sqrt(rx * rx + ry * ry);
             if (l > 1) { rx /= l; ry /= l; }
         } else {
@@ -162,7 +162,7 @@ void update() {
     g_lt = lt;
     g_rt = rt;
     input_set_virtual(b, (int16_t)(sx * 32767), (int16_t)(-sy * 32767),
-                      (int16_t)(rx * 32767), (int16_t)(ry * 32767), lt, rt);
+                      (int16_t)(rx * 32767), (int16_t)(-ry * 32767), lt, rt);
 }
 } // namespace
 
@@ -357,7 +357,7 @@ void touch_draw(IDirect3DDevice9 *d) {
         if (g_look_active) {
             quad(v + 6 * n++, g_look_x, g_look_y, LOOK_R, w, h, 0x60FFFFFF);
             quad(v + 6 * n++, g_look_x + g_stick_rx * LOOK_R / g_aspect,
-                 g_look_y + g_stick_ry * LOOK_R, LOOK_R * 0.45f, w, h, 0xD0FFFFFF);
+                 g_look_y - g_stick_ry * LOOK_R, LOOK_R * 0.45f, w, h, 0xD0FFFFFF);
         }
     }
     for (int i = 0; on && i < NB; i++) {
