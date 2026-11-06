@@ -57,7 +57,7 @@ public final class GameConfigWriter {
         int[] aspect = modes.rawAspect(c.aspect);
         writeLine(new File(save, "display.cfg"), aspect[0] + " " + aspect[1]);
         writeLine(new File(save, "touch.cfg"),
-                (c.touchControls ? 1 : 0) + " " + (c.nintendoLayout ? 1 : 0));
+                (c.touchControls ? 1 : 0) + " " + (c.nintendoLayout ? 1 : 0) + " " + c.cameraMode);
 
         writeSwitch(save, "nativeui.txt", c.nativeUi);
         writeSwitch(save, "teofis.txt", c.teofis);

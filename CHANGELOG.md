@@ -11,6 +11,23 @@ Skyrim Androidborn is a fork of
 [ttom795/Skyrim_Android](https://github.com/ttom795/Skyrim_Android), developed
 independently.
 
+## 0.1.5 — 2026-11-06
+
+Touch controls.
+
+### Touch
+- [Buttons are labelled on screen — you always know which button you are pressing]
+  A/B/X/Y, LB/RB/LT/RT and the Xbox View/Menu symbols are drawn inside each
+  button, and the keyboard button shows a clear key layout.
+- [Drag camera — look around by sliding your finger anywhere on the screen]
+  The camera follows the swipe and stops shortly after you lift the finger.
+- [Camera control can be changed in the launcher — the old fixed joystick is still available]
+  A "Camera control" row chooses between Joystick and Touch drag.
+
+### Notes
+Tested on a Retroid Pocket G2 (Adreno A22, Android 15): launcher, touch
+labels, drag camera, joystick camera, save load and 30 fps.
+
 ## 0.1.4 — 2026-11-06
 
 Audio fix.

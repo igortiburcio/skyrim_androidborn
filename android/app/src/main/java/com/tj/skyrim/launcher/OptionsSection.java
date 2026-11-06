@@ -22,6 +22,7 @@ public final class OptionsSection implements LauncherWindow.Content {
     private static final String[] RADIAL_BLUR = {"Low", "Medium", "High"};
     private static final String[] OBJECT_FADE = {"Short", "Medium", "Far", "Very far"};
     private static final String[] FRAME_CAP = {"Off", "30 fps", "60 fps", "120 fps"};
+    private static final String[] CAMERA_MODES = {"Joystick", "Touch drag"};
     private static final String[] LANGUAGES =
             {"English", "French", "German", "Italian", "Spanish", "Polish", "Russian", "Japanese"};
     private static final int[] FRAME_CAP_FPS = {0, 30, 60, 120};
@@ -82,6 +83,8 @@ public final class OptionsSection implements LauncherWindow.Content {
         toggle(pane, "fps", "Show FPS counter", false);
         toggle(pane, "nativeui", "Draw UI at native resolution", false);
         toggle(pane, "touch", "Touch controls", true);
+        stepper(pane, "camera", "Camera control", CAMERA_MODES,
+                settings.option("camera", 1), null);
         toggle(pane, "nintendo", "Nintendo button layout (A/B, X/Y swapped)", false);
 
         settings.aspectShown(aspect.selected());
@@ -120,7 +123,7 @@ public final class OptionsSection implements LauncherWindow.Content {
                 flag("teofis", false), flag("trees", false),
                 flag("async", true), flag("sustained", false),
                 flag("fps", false), flag("nativeui", false),
-                flag("touch", true), flag("nintendo", false));
+                flag("touch", true), flag("nintendo", false), value("camera", 1));
     }
 
     /* Row value, or the saved setting when the row was never built. */

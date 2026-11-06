@@ -1,6 +1,9 @@
-// On-screen touch controls: a virtual Xbox pad (left stick, right look area,
+// On-screen touch controls: a virtual Xbox pad (left stick, camera area,
 // A/B/X/Y, LT/RT, shoulders, Start/Back) that feeds the game's XInput input,
-// drawn over each frame with D3D9 just before Present.
+// drawn over each frame with D3D9 just before Present. Every button is
+// labelled. The camera is either a fixed-base analog stick (the old behaviour)
+// or a drag-anywhere surface, chosen in the launcher's "Camera control" row
+// and stored as touch.cfg's third field.
 //
 // Available on Android; on desktop enable with LB_TOUCH=1 (mouse clicks
 // then act as touches for testing). Where available, the PC-only "Vertical
@@ -20,35 +23,49 @@ extern "C" void input_set_virtual(uint16_t buttons, int16_t lx, int16_t ly, int1
 
 namespace {
 // Layout in units of screen height, anchored to a corner (ax, ay in {0,1}).
-struct Button { const char *name; uint16_t bit; float ax, ay, dx, dy, r; uint32_t color; uint8_t trig; };
+// label is drawn inside the disc (null: a symbol is drawn instead).
+struct Button {
+    const char *name; uint16_t bit; float ax, ay, dx, dy, r; uint32_t color; uint8_t trig;
+    const char *label; uint32_t text;
+};
 const Button k_buttons[] = {
-    {"A", 0x1000, 1, 1, -0.20f, -0.14f, 0.075f, 0xFF40C040, 0},
-    {"B", 0x2000, 1, 1, -0.08f, -0.27f, 0.075f, 0xFFE04040, 0},
-    {"X", 0x4000, 1, 1, -0.32f, -0.27f, 0.075f, 0xFF4080F0, 0},
-    {"Y", 0x8000, 1, 1, -0.20f, -0.40f, 0.075f, 0xFFF0D040, 0},
-    {"LB", 0x0100, 0, 0, 0.12f, 0.30f, 0.06f, 0xFFB0B0B0, 0},
-    {"RB", 0x0200, 1, 0, -0.12f, 0.30f, 0.06f, 0xFFB0B0B0, 0},
-    {"LT", 0, 0, 0, 0.12f, 0.42f, 0.06f, 0xFFB0B0B0, 1},
-    {"RT", 0, 1, 0, -0.12f, 0.42f, 0.06f, 0xFFB0B0B0, 2},
-    {"Back", 0x0020, 0, 0, 0.36f, 0.07f, 0.045f, 0xFFD0D0D0, 0},
-    {"Start", 0x0010, 1, 0, -0.36f, 0.07f, 0.045f, 0xFFFFFFFF, 0},
+    {"A", 0x1000, 1, 1, -0.20f, -0.14f, 0.075f, 0xFF40C040, 0, "A", 0xF0FFFFFF},
+    {"B", 0x2000, 1, 1, -0.08f, -0.27f, 0.075f, 0xFFE04040, 0, "B", 0xF0FFFFFF},
+    {"X", 0x4000, 1, 1, -0.32f, -0.27f, 0.075f, 0xFF4080F0, 0, "X", 0xF0FFFFFF},
+    {"Y", 0x8000, 1, 1, -0.20f, -0.40f, 0.075f, 0xFFF0D040, 0, "Y", 0xF0FFFFFF},
+    {"LB", 0x0100, 0, 0, 0.12f, 0.30f, 0.06f, 0xFFB0B0B0, 0, "LB", 0xF0FFFFFF},
+    {"RB", 0x0200, 1, 0, -0.12f, 0.30f, 0.06f, 0xFFB0B0B0, 0, "RB", 0xF0FFFFFF},
+    {"LT", 0, 0, 0, 0.12f, 0.42f, 0.06f, 0xFFB0B0B0, 1, "LT", 0xF0FFFFFF},
+    {"RT", 0, 1, 0, -0.12f, 0.42f, 0.06f, 0xFFB0B0B0, 2, "RT", 0xF0FFFFFF},
+    {"Back", 0x0020, 0, 0, 0.36f, 0.07f, 0.045f, 0xFFD0D0D0, 0, nullptr, 0xFF101010},
+    {"Start", 0x0010, 1, 0, -0.36f, 0.07f, 0.045f, 0xFFFFFFFF, 0, nullptr, 0xFF101010},
 };
 const int NB = sizeof k_buttons / sizeof k_buttons[0];
 const float STICK_X = 0.24f, STICK_Y = -0.26f, STICK_R = 0.17f; // from bottom-left
-const float LOOK_R = 0.15f;                                    // right look base radius
-const float LOOK_X = 0.62f, LOOK_Y = 0.70f;                    // right look base centre
+const float LOOK_R = 0.15f;                                    // fixed stick base radius
+const float LOOK_X = 0.62f, LOOK_Y = 0.70f;                    // fixed stick base centre
+// Drag camera: pending is in stick units; a drag adds travel * LOOK_GAIN and
+// each frame emits up to a full stick and keeps LOOK_DECAY of the rest, so the
+// camera stops shortly after the finger does. The game's own deadzone is
+// compensated at the output, otherwise short drags would do nothing.
+const float LOOK_GAIN = 60.0f;        // stick units per screen height of travel
+const float LOOK_DECAY = 0.65f;       // pending kept each frame
+const float LOOK_DEADZONE = 0.27f;    // the game's right-stick deadzone, cancelled at the output
+const float LOOK_MIN = 0.02f;         // below this the camera is still
 // Keyboard button, top-left: shows or hides the phone's keyboard. It stays
 // on screen when the touch controls are switched off.
-const Button k_kbd = {"Keyboard", 0, 0, 0, 0.08f, 0.07f, 0.045f, 0xFFE0E0E0};
-const int KBD = 100;          // Finger::button value for the keyboard button
+const Button k_kbd = {"Keyboard", 0, 0, 0, 0.08f, 0.07f, 0.045f, 0xFFE0E0E0, 0, nullptr, 0};
 
-struct Finger { SDL_FingerID id; int button; int stick; float x, y; bool used; };
+enum { F_NONE, F_BUTTON, F_MOVE, F_LOOK, F_KBD };
+struct Finger { SDL_FingerID id; int role; int button; float x, y, last_x, last_y; bool used; };
 Finger g_fingers[10];
 float g_stick_x, g_stick_y;      // left knob offset, -1..1
-float g_stick_rx, g_stick_ry;    // right look offset, -1..1
+float g_stick_rx, g_stick_ry;    // right output offset, -1..1
+float g_pending_x, g_pending_y;  // drag camera still to send, stick units
 bool g_look_active;
 bool g_available, g_decided, g_seen, g_was_on;
 bool g_touch_on = true;       // the player's choice, kept in <save>/touch.cfg
+bool g_camera_drag = false;   // drag camera instead of the fixed-base stick
 uint16_t g_buttons;
 uint8_t g_lt, g_rt;
 float g_aspect = 16.f / 9.f;  // width / height of the screen
@@ -86,6 +103,7 @@ bool enabled() {
         // Switched off in the menu: release everything the overlay was holding.
         for (auto &g : g_fingers) g.used = false;
         g_stick_x = g_stick_y = g_stick_rx = g_stick_ry = 0;
+        g_pending_x = g_pending_y = 0;
         g_look_active = false;
         g_buttons = 0;
         g_lt = g_rt = 0;
@@ -116,32 +134,37 @@ int hit_button(float x, float y) {
     return -1;
 }
 
+void push_input() {
+    input_set_virtual(g_buttons, (int16_t)(g_stick_x * 32767), (int16_t)(-g_stick_y * 32767),
+                      (int16_t)(g_stick_rx * 32767), (int16_t)(g_stick_ry * 32767), g_lt, g_rt);
+}
+
 void update() {
     uint16_t b = 0;
     float sx = 0, sy = 0, rx = 0, ry = 0;
     uint8_t lt = 0, rt = 0;
-    bool right_used = false;
+    bool look_used = false;
     g_look_active = false;
     for (auto &f : g_fingers) {
         if (!f.used) continue;
-        if (f.stick == 1) {
+        if (f.role == F_MOVE) {
             float cx, cy;
             stick_pos(&cx, &cy);
             sx = (f.x - cx) * g_aspect / STICK_R;
             sy = (f.y - cy) / STICK_R;
             float l = std::sqrt(sx * sx + sy * sy);
             if (l > 1) { sx /= l; sy /= l; }
-        } else if (f.stick == 2) {
-            if (right_used) continue;
-            right_used = true;
+        } else if (f.role == F_LOOK) {
+            if (g_camera_drag || look_used) continue;
+            // fixed-base analog stick, the old camera control
+            look_used = true;
             g_look_active = true;
             rx = (f.x - LOOK_X) * g_aspect / LOOK_R;
             ry = -(f.y - LOOK_Y) / LOOK_R;  /* drag up = +1, the game's forward */
             float l = std::sqrt(rx * rx + ry * ry);
             if (l > 1) { rx /= l; ry /= l; }
-        } else {
+        } else if (f.role == F_BUTTON) {
             // a finger may slide between buttons
-            if (f.button == KBD) continue;
             int h = hit_button(f.x, f.y);
             if (h >= 0) f.button = h;
             if (f.button >= 0) {
@@ -155,12 +178,41 @@ void update() {
     g_buttons = b;
     g_stick_x = sx;
     g_stick_y = sy;
-    g_stick_rx = rx;
-    g_stick_ry = ry;
     g_lt = lt;
     g_rt = rt;
-    input_set_virtual(b, (int16_t)(sx * 32767), (int16_t)(-sy * 32767),
-                      (int16_t)(rx * 32767), (int16_t)(ry * 32767), lt, rt);
+    if (!g_camera_drag) {
+        g_stick_rx = rx;
+        g_stick_ry = ry;
+    }
+    push_input();
+}
+
+// Drag camera: turn the travel collected since the last frame into stick
+// pulses. A full stick is emitted per frame at most; the rest stays for the
+// next frames and fades, so a flick keeps turning briefly after the finger
+// lifts instead of spinning while it rests.
+void camera_frame() {
+    if (!g_camera_drag) return;
+    float rx = g_pending_x, ry = g_pending_y;
+    rx = rx > 1 ? 1 : rx < -1 ? -1 : rx;
+    ry = ry > 1 ? 1 : ry < -1 ? -1 : ry;
+    g_pending_x = (g_pending_x - rx) * LOOK_DECAY;
+    g_pending_y = (g_pending_y - ry) * LOOK_DECAY;
+    if (std::fabs(g_pending_x) < 0.01f) g_pending_x = 0;
+    if (std::fabs(g_pending_y) < 0.01f) g_pending_y = 0;
+    float l = std::sqrt(rx * rx + ry * ry);
+    if (l > LOOK_MIN) {
+        // the game subtracts its own deadzone: add it back so small drags aim
+        float m = LOOK_DEADZONE + (1 - LOOK_DEADZONE) * (l > 1 ? 1 : l);
+        rx = rx / l * m;
+        ry = ry / l * m;
+    } else {
+        rx = ry = 0;
+    }
+    if (rx == g_stick_rx && ry == g_stick_ry) return;  // stopped: nothing to send
+    g_stick_rx = rx;
+    g_stick_ry = ry;
+    push_input();
 }
 } // namespace
 
@@ -216,27 +268,46 @@ extern "C" void touch_handle_event(const SDL_Event *e) {
         if (!f) return;
         f->used = true;
         f->id = id;
+        f->button = -1;
+        f->x = f->last_x = x;
+        f->y = f->last_y = y;
         if (kbd) {
-            f->button = KBD;
-            f->stick = 0;
+            f->role = F_KBD;
             platform_text_input(1);
             return;
         }
-        f->button = hit_button(x, y);
-        f->stick = 0;
-        if (f->button < 0) {
-            if (x < 0.5f) {
-                f->stick = 1;  /* movement */
-            } else {
-                f->stick = 2;  /* camera: fixed right stick base */
-            }
+        int h = hit_button(x, y);
+        if (h >= 0) {
+            f->role = F_BUTTON;
+            f->button = h;
+        } else if (g_camera_drag) {
+            // movement only from the visible stick; the rest drags the camera
+            float cx, cy;
+            stick_pos(&cx, &cy);
+            float sdx = (x - cx) * g_aspect, sdy = y - cy, sr = STICK_R * 1.15f;
+            f->role = sdx * sdx + sdy * sdy < sr * sr ? F_MOVE : F_LOOK;
+        } else {
+            // fixed-base camera: left half moves, right half looks (old control)
+            f->role = x < 0.5f ? F_MOVE : F_LOOK;
         }
     }
     if (!f) return;
+    if (f->role == F_LOOK && g_camera_drag && !down && !up) {
+        // travel since the last event; up is +1 (the game's forward)
+        g_pending_x += (x - f->last_x) * g_aspect * LOOK_GAIN;
+        g_pending_y += -(y - f->last_y) * LOOK_GAIN;
+        // keep a flick from spinning the camera for long after the finger lifts
+        if (g_pending_x > 8) g_pending_x = 8;
+        if (g_pending_x < -8) g_pending_x = -8;
+        if (g_pending_y > 8) g_pending_y = 8;
+        if (g_pending_y < -8) g_pending_y = -8;
+    }
     f->x = x;
     f->y = y;
+    f->last_x = x;
+    f->last_y = y;
     if (up) f->used = false;
-    if (f->button != KBD && on) update();
+    if (f->role != F_KBD && on) update();
 }
 
 // ---------------------------------------------------------------- drawing
@@ -265,6 +336,83 @@ void make_texture(IDirect3DDevice9 *d) {
     g_tex->UnlockRect(0);
 }
 
+// Tiny 5x7 font for the button labels. Each glyph lives in an 8x8 cell of a
+// 80x8 atlas; cell 9 is solid white and draws the Start symbol.
+const int FONT_W = 80, FONT_H = 8;
+const char k_font_chars[] = "ABXYLRTCK";
+const uint8_t k_font_bits[9][7] = {
+    {0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11},  // A
+    {0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E},  // B
+    {0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11},  // X
+    {0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04},  // Y
+    {0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F},  // L
+    {0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11},  // R
+    {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04},  // T
+    {0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E},  // C
+    {0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11},  // K
+};
+IDirect3DTexture9 *g_font;
+
+void make_font_texture(IDirect3DDevice9 *d) {
+    if (FAILED(d->CreateTexture(FONT_W, FONT_H, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &g_font, nullptr)))
+        return;
+    D3DLOCKED_RECT lr;
+    if (FAILED(g_font->LockRect(0, &lr, nullptr, 0))) return;
+    for (int y = 0; y < FONT_H; y++) {
+        uint32_t *row = (uint32_t *)((uint8_t *)lr.pBits + y * lr.Pitch);
+        for (int x = 0; x < FONT_W; x++) row[x] = 0;
+    }
+    for (int c = 0; c < 9; c++)
+        for (int y = 0; y < 7; y++) {
+            uint32_t *row = (uint32_t *)((uint8_t *)lr.pBits + y * lr.Pitch);
+            for (int x = 0; x < 5; x++)
+                if (k_font_bits[c][y] & (0x10 >> x)) row[c * 8 + 1 + x] = 0xFFFFFFFF;
+        }
+    for (int y = 0; y < FONT_H; y++) {  // solid cell
+        uint32_t *row = (uint32_t *)((uint8_t *)lr.pBits + y * lr.Pitch);
+        for (int x = 72; x < FONT_W; x++) row[x] = 0xFFFFFFFF;
+    }
+    g_font->UnlockRect(0);
+}
+
+int glyph_index(char c) {
+    for (int i = 0; i < 9; i++)
+        if (k_font_chars[i] == c) return i;
+    return -1;
+}
+
+// A textured quad in pixels; cell 9 is the solid fill used for the symbols.
+void cell_quad(Vtx *v, int cell, float x0, float y0, float x1, float y1, uint32_t color) {
+    bool solid = cell == 9;
+    // sample texel centres so the 5x7 glyph keeps its shape when stretched
+    float u0 = (cell * 8 + (solid ? 0.5f : 1.5f)) / FONT_W;
+    float u1 = (cell * 8 + (solid ? 7.5f : 5.5f)) / FONT_W;
+    float v0 = (solid ? 0.5f : 0.5f) / FONT_H, v1 = (solid ? 7.5f : 6.5f) / FONT_H;
+    Vtx q[4] = {{x0, y0, 0, 1, color, u0, v0}, {x1, y0, 0, 1, color, u1, v0},
+                {x0, y1, 0, 1, color, u0, v1}, {x1, y1, 0, 1, color, u1, v1}};
+    v[0] = q[0]; v[1] = q[1]; v[2] = q[2];
+    v[3] = q[2]; v[4] = q[1]; v[5] = q[3];
+}
+
+void text_px(Vtx *v, int *n, const char *s, float cx, float cy, float size, float w, float h,
+             uint32_t color) {
+    int len = (int)strlen(s);
+    float gw = size * 5.f / 7.f, adv = size * 6.4f / 7.f;
+    float off = size > 24 ? 1.5f : 1.f;
+    // centre the visible ink, not the advance width (which has trailing space)
+    float span = len > 0 ? (len - 1) * adv + gw : 0;
+    float x = cx * w - span / 2, y = cy * h - size / 2;
+    for (int i = 0; i < len; i++) {
+        int gi = glyph_index(s[i]);
+        if (gi >= 0) {
+            // drop shadow, so the label reads over a dark or a bright scene
+            cell_quad(v + 6 * (*n)++, gi, x + off, y + off, x + gw + off, y + size + off, 0xB0000000);
+            cell_quad(v + 6 * (*n)++, gi, x, y, x + gw, y + size, color);
+        }
+        x += adv;
+    }
+}
+
 void quad(Vtx *v, float cx, float cy, float rx, float ry, float w, float h, uint32_t color) {
     float x0 = (cx - rx / g_aspect) * w, x1 = (cx + rx / g_aspect) * w;
     float y0 = (cy - ry) * h, y1 = (cy + ry) * h;
@@ -279,6 +427,7 @@ void quad(Vtx *v, float cx, float cy, float r, float w, float h, uint32_t color)
 void touch_draw(IDirect3DDevice9 *d) {
     if (!available()) return;
     bool on = enabled();
+    if (on) camera_frame();
     IDirect3DSurface9 *bb = nullptr, *old = nullptr;
     if (FAILED(d->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb))) return;
     D3DSURFACE_DESC desc;
@@ -286,8 +435,9 @@ void touch_draw(IDirect3DDevice9 *d) {
     float w = (float)desc.Width, h = (float)desc.Height;
     g_aspect = w / h;
     if (!g_tex) make_texture(d);
+    if (!g_font) make_font_texture(d);
     if (!g_state) d->CreateStateBlock(D3DSBT_ALL, &g_state);
-    if (!g_tex || !g_state) { bb->Release(); return; }
+    if (!g_tex || !g_font || !g_state) { bb->Release(); return; }
     g_state->Capture();
     d->GetRenderTarget(0, &old);
     d->SetRenderTarget(0, bb);
@@ -330,17 +480,13 @@ void touch_draw(IDirect3DDevice9 *d) {
 
     Vtx v[6 * (NB + 16)];
     int n = 0;
-    // keyboard button: a disc with two rows of keys and a space bar
+    // keyboard button: the disc here; its keys are drawn with the text batch so
+    // they are crisp rectangles instead of soft dots
     {
         float kx, ky, r = k_kbd.r;
         button_pos(k_kbd, &kx, &ky);
         uint32_t a = platform_text_input(-1) ? 0xF0 : 0x90;
         quad(v + 6 * n++, kx, ky, r, w, h, (k_kbd.color & 0xFFFFFF) | a << 24);
-        for (int row = 0; row < 2; row++)
-            for (int k = 0; k < 4; k++)
-                quad(v + 6 * n++, kx + (k - 1.5f) * r * 0.36f / g_aspect, ky + (row - 1) * r * 0.34f, r * 0.11f,
-                     w, h, 0xFF303030);
-        quad(v + 6 * n++, kx, ky + r * 0.4f, r * 0.5f, r * 0.1f, w, h, 0xFF303030);
     }
     // the HUD (crosshair included) is on the second screen: a dot instead
     if (hud_screen_crosshair()) quad(v + 6 * n++, 0.5f, 0.5f, 0.007f, w, h, 0xD0FFFFFF);
@@ -350,10 +496,12 @@ void touch_draw(IDirect3DDevice9 *d) {
         quad(v + 6 * n++, sx, sy, STICK_R, w, h, 0x90FFFFFF);
         quad(v + 6 * n++, sx + g_stick_x * STICK_R / g_aspect,
              sy + g_stick_y * STICK_R, STICK_R * 0.45f, w, h, 0xD0FFFFFF);
-        uint32_t la = g_look_active ? 0xA0u : 0x60u;
-        quad(v + 6 * n++, LOOK_X, LOOK_Y, LOOK_R, w, h, (la << 24) | 0x00FFFFFFu);
-        quad(v + 6 * n++, LOOK_X + g_stick_rx * LOOK_R / g_aspect,
-             LOOK_Y - g_stick_ry * LOOK_R, LOOK_R * 0.45f, w, h, 0xD0FFFFFF);
+        if (!g_camera_drag) {  // the fixed-base camera keeps its ring and knob
+            uint32_t la = g_look_active ? 0xA0u : 0x60u;
+            quad(v + 6 * n++, LOOK_X, LOOK_Y, LOOK_R, w, h, (la << 24) | 0x00FFFFFFu);
+            quad(v + 6 * n++, LOOK_X + g_stick_rx * LOOK_R / g_aspect,
+                 LOOK_Y - g_stick_ry * LOOK_R, LOOK_R * 0.45f, w, h, 0xD0FFFFFF);
+        }
     }
     for (int i = 0; on && i < NB; i++) {
         float bx, by;
@@ -366,6 +514,68 @@ void touch_draw(IDirect3DDevice9 *d) {
         quad(v + 6 * n++, bx, by, k_buttons[i].r, w, h, (col & 0xFFFFFF) | a << 24);
     }
     d->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2 * n, v, sizeof(Vtx));
+    // The keyboard icon and the button labels use their own atlas (crisp solid
+    // rectangles and glyphs), so they go in a second batch with the same states.
+    {
+        Vtx tv[6 * 96];
+        int tn = 0;
+        {  // keyboard button: dark body with light keys and a space bar
+            float kx, ky, r = k_kbd.r;
+            button_pos(k_kbd, &kx, &ky);
+            float x = kx * w, y = ky * h, s = r * h;
+            bool active = platform_text_input(-1) != 0;
+            uint32_t body = active ? 0xD8303030 : 0xB8303030;
+            uint32_t key = active ? 0xF0FFFFFF : 0xB0FFFFFF;
+            auto rect = [&](float x0, float y0, float x1, float y1, uint32_t c) {
+                cell_quad(tv + 6 * tn++, 9, x0, y0, x1, y1, c);
+            };
+            rect(x - 0.66f * s, y - 0.40f * s, x + 0.66f * s, y + 0.40f * s, body);
+            float kw = 0.17f * s, kh = 0.14f * s, gx = 0.24f * s;
+            for (int row = 0; row < 2; row++)
+                for (int k = 0; k < 4; k++)
+                    rect(x + (k - 1.5f) * gx - kw / 2, y + (row - 1) * 0.19f * s - kh / 2,
+                         x + (k - 1.5f) * gx + kw / 2, y + (row - 1) * 0.19f * s + kh / 2, key);
+            rect(x - 0.30f * s, y + 0.20f * s - kh / 2, x + 0.30f * s, y + 0.20f * s + kh / 2, key);
+        }
+        for (int i = 0; on && i < NB; i++) {
+            float bx, by;
+            button_pos(k_buttons[i], &bx, &by);
+            uint32_t col = k_buttons[i].text;
+            if (k_buttons[i].label) {
+                int len = (int)strlen(k_buttons[i].label);
+                float size = k_buttons[i].r * h * 0.55f;
+                // shrink long labels to stay inside the disc
+                float adv = size * 6.4f / 7.f, gw = size * 5.f / 7.f;
+                float span = (len - 1) * adv + gw;
+                float maxw = k_buttons[i].r * h * 1.55f;
+                if (span > maxw) size *= maxw / span;
+                text_px(tv, &tn, k_buttons[i].label, bx, by, size, w, h, col);
+                continue;
+            }
+            float x = bx * w, y = by * h, s = k_buttons[i].r * h;
+            auto rect = [&](float x0, float y0, float x1, float y1) {
+                cell_quad(tv + 6 * tn++, 9, x0, y0, x1, y1, col);
+            };
+            if (!strcmp(k_buttons[i].name, "Back")) {
+                // two overlapping windows, centred on the disc
+                float bw = s * 0.78f, bh = s * 0.62f, t = s * 0.13f;
+                auto frame = [&](float x0, float y0, float x1, float y1) {
+                    rect(x0, y0, x1, y0 + t);
+                    rect(x0, y1 - t, x1, y1);
+                    rect(x0, y0 + t, x0 + t, y1 - t);
+                    rect(x1 - t, y0 + t, x1, y1 - t);
+                };
+                frame(x - bw * 0.725f, y - bh * 0.725f, x + bw * 0.275f, y + bh * 0.275f);
+                frame(x - bw * 0.275f, y - bh * 0.275f, x + bw * 0.725f, y + bh * 0.725f);
+            } else {  // Start: three stacked bars
+                float bw = s * 0.9f, bh = s * 0.13f, gap = s * 0.26f;
+                for (int k = -1; k <= 1; k++)
+                    rect(x - bw / 2, y + k * gap - bh / 2, x + bw / 2, y + k * gap + bh / 2);
+            }
+        }
+        d->SetTexture(0, g_font);
+        d->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2 * tn, tv, sizeof(Vtx));
+    }
     d->EndScene();
     d->SetRenderTarget(0, old);
     if (old) old->Release();
@@ -769,11 +979,19 @@ extern "C" void touch_setup_guest(void) {
     return;
 #endif
 #ifdef GAME_SKYRIM
-    /* No Skyrim menu hooks: the Android launcher writes touch.cfg ("<touch> <nintendo>"). */
+    /* No Skyrim menu hooks: the Android launcher writes touch.cfg
+     * ("<touch> <nintendo> <camera: 0 stick, 1 drag>"). Configs from before the
+     * camera row have two fields and start in drag mode. */
     if (FILE *f = fopen(cfg_path().c_str(), "r")) {
-        int t = 1, n = 0;
-        if (fscanf(f, "%d %d", &t, &n) >= 1) { g_touch_on = t != 0; g_nintendo = n != 0; }
+        int t = 1, n = 0, c = 1;
+        if (fscanf(f, "%d %d %d", &t, &n, &c) >= 1) {
+            g_touch_on = t != 0;
+            g_nintendo = n != 0;
+            g_camera_drag = c != 0;
+        }
         fclose(f);
+    } else {
+        g_camera_drag = true;
     }
     input_set_nintendo(g_nintendo);
     return;

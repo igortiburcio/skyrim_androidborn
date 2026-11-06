@@ -12,7 +12,7 @@ own copy of the PC game.
 Tested on a **Retroid Pocket G2** (Adreno A22, Android 15). Also tested on a
 **Xiaomi 15T** (Mali-G720, Android 15) with the PanVK driver.
 
-Current version: **0.1.4** — see [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.1.5** — see [CHANGELOG.md](CHANGELOG.md).
 
 ## Screenshots
 
@@ -78,15 +78,19 @@ Special Edition is 64-bit DirectX 11 and does not work.
 | **Asynchronous rendering** | Compiles shaders on background threads (on by default). | Avoids freezes when new effects appear; turn it off if objects pop in or flash. |
 | **Sustained performance mode** | Asks Android for a steady clock instead of short boosts. | Can keep the device cooler and the fan quieter. |
 | **Touch controls / Nintendo layout** | Shows the touch overlay; swaps A/B and X/Y on controllers. | Play without a controller, or match Nintendo buttons. |
+| **Camera control** | Picks the drag-anywhere camera or the fixed-base look stick. | Use the camera that feels right on your phone. |
 
 ## Controls
 
 - Bluetooth, USB and integrated controllers use the Xbox layout by default;
   enable the Nintendo layout to swap A/B and X/Y.
-- The touch overlay has a left stick, a right-side look stick, A/B/X/Y, LT/RT,
-  shoulders, Start and Back. The look stick has a fixed base like a controller
-  analog stick: drag on the right half to look. LT/RT are the left/right hand
-  attacks.
+- The touch overlay has a left stick, A/B/X/Y, LT/RT, shoulders, Start and Back,
+  all labelled, plus a keyboard button and Xbox View/Menu symbols. LT/RT are
+  the left/right hand attacks.
+- **Camera control** in the launcher picks between **Touch drag** (default:
+  slide a finger anywhere outside the buttons and the movement stick; the
+  camera follows the swipe and stops when you lift) and **Joystick** (the
+  fixed-base analog stick on the right half of the screen).
 
 ## Troubleshooting
 
