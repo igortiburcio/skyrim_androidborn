@@ -35,18 +35,18 @@ const Button k_buttons[] = {
 };
 const int NB = sizeof k_buttons / sizeof k_buttons[0];
 const float STICK_X = 0.24f, STICK_Y = -0.26f, STICK_R = 0.17f; // from bottom-left
-const float LOOK_R = 0.15f;                                    // right look area radius
+const float LOOK_R = 0.15f;                                    // right look base radius
+const float LOOK_X = 0.62f, LOOK_Y = 0.70f;                    // right look base centre
 // Keyboard button, top-left: shows or hides the phone's keyboard. It stays
 // on screen when the touch controls are switched off.
 const Button k_kbd = {"Keyboard", 0, 0, 0, 0.08f, 0.07f, 0.045f, 0xFFE0E0E0};
 const int KBD = 100;          // Finger::button value for the keyboard button
 
-struct Finger { SDL_FingerID id; int button; int stick; float x, y; float ax, ay; bool used; };
+struct Finger { SDL_FingerID id; int button; int stick; float x, y; bool used; };
 Finger g_fingers[10];
 float g_stick_x, g_stick_y;      // left knob offset, -1..1
 float g_stick_rx, g_stick_ry;    // right look offset, -1..1
 bool g_look_active;
-float g_look_x, g_look_y;        // right look anchor, 0..1
 bool g_available, g_decided, g_seen, g_was_on;
 bool g_touch_on = true;       // the player's choice, kept in <save>/touch.cfg
 uint16_t g_buttons;
@@ -135,10 +135,8 @@ void update() {
             if (right_used) continue;
             right_used = true;
             g_look_active = true;
-            g_look_x = f.ax;
-            g_look_y = f.ay;
-            rx = (f.x - f.ax) * g_aspect / LOOK_R;
-            ry = (f.y - f.ay) / LOOK_R;  /* screen space; the game takes -y */
+            rx = (f.x - LOOK_X) * g_aspect / LOOK_R;
+            ry = -(f.y - LOOK_Y) / LOOK_R;  /* drag up = +1, the game's forward */
             float l = std::sqrt(rx * rx + ry * ry);
             if (l > 1) { rx /= l; ry /= l; }
         } else {
@@ -162,7 +160,7 @@ void update() {
     g_lt = lt;
     g_rt = rt;
     input_set_virtual(b, (int16_t)(sx * 32767), (int16_t)(-sy * 32767),
-                      (int16_t)(rx * 32767), (int16_t)(-ry * 32767), lt, rt);
+                      (int16_t)(rx * 32767), (int16_t)(ry * 32767), lt, rt);
 }
 } // namespace
 
@@ -230,9 +228,7 @@ extern "C" void touch_handle_event(const SDL_Event *e) {
             if (x < 0.5f) {
                 f->stick = 1;  /* movement */
             } else {
-                f->stick = 2;  /* camera */
-                f->ax = x;
-                f->ay = y;
+                f->stick = 2;  /* camera: fixed right stick base */
             }
         }
     }
@@ -352,13 +348,12 @@ void touch_draw(IDirect3DDevice9 *d) {
     stick_pos(&sx, &sy);
     if (on) {
         quad(v + 6 * n++, sx, sy, STICK_R, w, h, 0x90FFFFFF);
-        quad(v + 6 * n++, sx + g_stick_x * STICK_R / g_aspect, sy + g_stick_y * STICK_R, STICK_R * 0.45f, w, h,
-             0xD0FFFFFF);
-        if (g_look_active) {
-            quad(v + 6 * n++, g_look_x, g_look_y, LOOK_R, w, h, 0x60FFFFFF);
-            quad(v + 6 * n++, g_look_x + g_stick_rx * LOOK_R / g_aspect,
-                 g_look_y - g_stick_ry * LOOK_R, LOOK_R * 0.45f, w, h, 0xD0FFFFFF);
-        }
+        quad(v + 6 * n++, sx + g_stick_x * STICK_R / g_aspect,
+             sy + g_stick_y * STICK_R, STICK_R * 0.45f, w, h, 0xD0FFFFFF);
+        uint32_t la = g_look_active ? 0xA0u : 0x60u;
+        quad(v + 6 * n++, LOOK_X, LOOK_Y, LOOK_R, w, h, (la << 24) | 0x00FFFFFFu);
+        quad(v + 6 * n++, LOOK_X + g_stick_rx * LOOK_R / g_aspect,
+             LOOK_Y - g_stick_ry * LOOK_R, LOOK_R * 0.45f, w, h, 0xD0FFFFFF);
     }
     for (int i = 0; on && i < NB; i++) {
         float bx, by;
