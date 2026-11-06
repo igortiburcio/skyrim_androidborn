@@ -82,9 +82,10 @@ Special Edition is 64-bit DirectX 11 and does not work.
 
 - Bluetooth, USB and integrated controllers use the Xbox layout by default;
   enable the Nintendo layout to swap A/B and X/Y.
-- The touch overlay has a left stick, a right-side look area, A/B/X/Y, LT/RT,
-  shoulders, Start and Back. Drag anywhere on the right half to look; LT/RT
-  are the left/right hand attacks.
+- The touch overlay has a left stick, a right-side look stick, A/B/X/Y, LT/RT,
+  shoulders, Start and Back. The look stick has a fixed base like a controller
+  analog stick: drag on the right half to look. LT/RT are the left/right hand
+  attacks.
 
 ## Troubleshooting
 

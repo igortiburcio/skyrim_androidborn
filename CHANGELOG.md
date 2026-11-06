@@ -16,8 +16,9 @@ independently.
 Touch controls.
 
 ### Touch
-- [Right-side look area — camera works on touch-only devices] Dragging on the
-  right half of the screen feeds the right stick to the game.
+- [Right-side look stick — camera control works like a controller analog
+  stick] The right half of the screen has a fixed base with a knob that stays
+  inside it; drag in any direction to look on touch-only devices.
 - [LT/RT buttons — left and right hand attacks work on touch-only devices]
   The triggers are now passed to the game instead of staying at zero.
 - [Overlay stays visible — the first touch acts immediately] The old 2-second
