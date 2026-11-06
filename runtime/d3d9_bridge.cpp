@@ -3,7 +3,9 @@
 // presentation). Everything else is generated into d3d9_bridge_gen.cpp.
 #include <SDL2/SDL.h>
 #include <ctype.h>
+#include <cstdio>
 #include <functional>
+#include <unistd.h>
 #include <vector>
 void shadow_flush(void *obj);
 void shadow_forget(void *obj);
@@ -13,6 +15,7 @@ bool bc_lock(void *tex, uint32_t sub, uint32_t w, uint32_t h, const RECT *r, DWO
              const std::function<HRESULT(D3DLOCKED_RECT *, const RECT *)> &lock, HRESULT *hr);
 bool bc_unlock(void *tex, uint32_t sub);
 bool bc_surface_target(void *surf, void **tex, uint32_t *sub);
+#include <atomic>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
@@ -24,7 +27,12 @@ struct IfaceInfo { const char *name = nullptr; uint32_t vtbl = 0; };
 IfaceInfo g_ifaces[64];
 std::recursive_mutex g_lock;
 std::unordered_map<void *, uint32_t> g_host_to_guest;
-std::vector<void *> g_objs{nullptr};
+/* The host pointer for a guest COM object is read on every D3D9 call. A
+ * fixed atomic table makes that lookup lock-free; only creation/destruction
+ * (which need the free list) take the mutex. */
+constexpr uint32_t kMaxObjects = 1u << 16;
+std::atomic<void *> g_objs[kMaxObjects] = {};
+uint32_t g_next_obj = 1;
 std::vector<uint32_t> g_free_ids;
 }
 
@@ -42,9 +50,10 @@ void com_register_iface(int iface, const char *name, const ShimFn *fns, int n) {
 void *com_host(uint32_t g) {
     if (!g) return nullptr;
     uint32_t id = M32(g + 4);
-    std::lock_guard<std::recursive_mutex> l(g_lock);
-    if (id >= g_objs.size()) rt_fatal("bad guest COM object %08x", g);
-    return g_objs[id];
+    if (id >= kMaxObjects) rt_fatal("bad guest COM object %08x", g);
+    void *h = g_objs[id].load(std::memory_order_acquire);
+    if (!h) rt_fatal("bad guest COM object %08x", g);
+    return h;
 }
 
 uint32_t com_wrap(void *host, int iface) {
@@ -56,14 +65,18 @@ uint32_t com_wrap(void *host, int iface) {
     // object of another type, the stale mapping must not be returned.
     if (it != g_host_to_guest.end()) {
         if ((int)M32(it->second + 8) == iface) return it->second;
-        g_objs[M32(it->second + 4)] = nullptr;
+        g_objs[M32(it->second + 4)].store(nullptr, std::memory_order_release);
         g_free_ids.push_back(M32(it->second + 4));
         M32(it->second) = 0xDEAD0000u;
         g_host_to_guest.erase(it);
     }
     uint32_t id;
-    if (!g_free_ids.empty()) { id = g_free_ids.back(); g_free_ids.pop_back(); g_objs[id] = host; }
-    else { id = (uint32_t)g_objs.size(); g_objs.push_back(host); }
+    if (!g_free_ids.empty()) { id = g_free_ids.back(); g_free_ids.pop_back(); }
+    else {
+        id = g_next_obj++;
+        if (id >= kMaxObjects) rt_fatal("out of COM objects");
+    }
+    g_objs[id].store(host, std::memory_order_release);
     uint32_t g = gmalloc(16);
     M32(g) = g_ifaces[iface].vtbl;
     M32(g + 4) = id;
@@ -80,7 +93,7 @@ static void com_forget(uint32_t g) {
     shadow_forget(h);
     bc_forget(h);
     g_host_to_guest.erase(h);
-    g_objs[id] = nullptr;
+    g_objs[id].store(nullptr, std::memory_order_release);
     g_free_ids.push_back(id);
     M32(g) = 0xDEAD0000u;
     gfree(g);
@@ -220,36 +233,86 @@ void B_IDirect3D9_GetAdapterIdentifier(CPU *c) {
     RET((uint32_t)hr, 4);
 }
 
-// Display modes: a fixed list of heights (never above the window's) at the
-// window's aspect ratio; the launcher offers the same list as "Resolution"
-// and writes the chosen one to SkyrimPrefs.ini (the game only accepts a size
-// that is in this list). The chosen mode becomes the back buffer, which dxvk
-// scales up to the window.
+// Display modes: a fixed list of heights at the aspect ratio chosen in the
+// launcher (<save>/display.cfg, "an ad"; "0 0" = the screen's own). The
+// launcher offers the same list as "Resolution" and writes the chosen one to
+// SkyrimPrefs.ini (the game only accepts a size that is in this list). The
+// chosen mode becomes the back buffer, which dxvk scales up to the window,
+// letterboxed when its aspect differs from the screen's (see view_rect).
 static const uint32_t k_mode_heights[] = {1080, 900, 720, 648, 576, 540, 480, 432, 360, 288, 270, 216, 180, 144, 108};
-static uint32_t mode_count(int *ww, int *wh) {
+static int g_aspect_n = -1, g_aspect_d;
+static void mode_aspect(int ww, int wh, int64_t *an, int64_t *ad) {
+    if (g_aspect_n < 0) {
+        g_aspect_n = g_aspect_d = 0;
+        char path[1024];
+        snprintf(path, sizeof path, "%s/display.cfg", g_save_dir);
+        if (FILE *f = fopen(path, "r")) {
+            if (fscanf(f, "%d %d", &g_aspect_n, &g_aspect_d) != 2 || g_aspect_n <= 0 || g_aspect_d <= 0)
+                g_aspect_n = g_aspect_d = 0;
+            fclose(f);
+        }
+        LOG("display aspect %d:%d", g_aspect_n, g_aspect_d);
+    }
+    *an = g_aspect_n ? g_aspect_n : ww;
+    *ad = g_aspect_n ? g_aspect_d : wh;
+}
+static uint32_t mode_count(int *ww, int *wh, int64_t *an, int64_t *ad, uint32_t *top) {
     *ww = 1280; *wh = 720;
     SDL_GetWindowSize((SDL_Window *)platform_window(), ww, wh);
-    uint32_t n = 1;  // the window size itself
-    for (uint32_t h : k_mode_heights) if ((int)h < *wh) n++;
+    mode_aspect(*ww, *wh, an, ad);
+    int64_t t = (int64_t)*ww * *ad / *an;
+    *top = (uint32_t)(t < *wh ? t : *wh);
+    uint32_t n = 1;  // the largest size that fits the window
+    for (uint32_t h : k_mode_heights) if (h < *top) n++;
     return n;
 }
+static uint32_t mode_count() { int ww, wh; int64_t an, ad; uint32_t top; return mode_count(&ww, &wh, &an, &ad, &top); }
 extern "C" void bridge_scaled_mode(uint32_t i, uint32_t *w, uint32_t *h) {
     int ww, wh;
-    mode_count(&ww, &wh);
-    uint32_t k = 0;
-    *w = (uint32_t)ww; *h = (uint32_t)wh;
+    int64_t an, ad;
+    uint32_t top, k = 0;
+    mode_count(&ww, &wh, &an, &ad, &top);
+    *h = top;
+    *w = (uint32_t)(top * an / ad) & ~1u;
     if (i == 0) return;
     for (uint32_t mh : k_mode_heights) {
-        if ((int)mh >= wh) continue;
-        if (++k == i) { *h = mh; *w = (uint32_t)((uint64_t)mh * ww / wh) & ~1u; return; }
+        if (mh >= top) continue;
+        if (++k == i) { *h = mh; *w = (uint32_t)(mh * an / ad) & ~1u; return; }
     }
 }
-void B_IDirect3D9_GetAdapterModeCount(CPU *c) { int ww, wh; RET(mode_count(&ww, &wh), 3); }
+
+// The back buffer size (from CreateDevice/Reset) and the part of the window
+// it is shown in: as large as fits at its own aspect, centred.
+static uint32_t g_bb_w, g_bb_h;
+static RECT view_rect() {
+    int ww = 1280, wh = 720;
+    SDL_GetWindowSize((SDL_Window *)platform_window(), &ww, &wh);
+    RECT r = {0, 0, ww, wh};
+    if (!g_bb_w || !g_bb_h) return r;
+    int64_t w = (int64_t)wh * g_bb_w / g_bb_h, h = wh;
+    if (w > ww) { w = ww; h = (int64_t)ww * g_bb_h / g_bb_w; }
+    // within a pixel or two of the window: just stretch
+    if (ww - w <= 2 && wh - h <= 2) return r;
+    r.left = (LONG)((ww - w) / 2);
+    r.top = (LONG)((wh - h) / 2);
+    r.right = r.left + (LONG)w;
+    r.bottom = r.top + (LONG)h;
+    return r;
+}
+// The same rectangle in 0..1 window coordinates, for the touch overlay.
+extern "C" void bridge_view_rect(float *x0, float *y0, float *x1, float *y1) {
+    int ww = 1280, wh = 720;
+    SDL_GetWindowSize((SDL_Window *)platform_window(), &ww, &wh);
+    RECT r = view_rect();
+    *x0 = (float)r.left / ww; *x1 = (float)r.right / ww;
+    *y0 = (float)r.top / wh; *y1 = (float)r.bottom / wh;
+}
+
+void B_IDirect3D9_GetAdapterModeCount(CPU *c) { RET(mode_count(), 3); }
 void B_IDirect3D9_EnumAdapterModes(CPU *c) {
     /* (this, adapter, format, mode, D3DDISPLAYMODE *) */
     uint32_t i = ARG(3), p = ARG(4);
-    int ww, wh;
-    if (i >= mode_count(&ww, &wh)) RET(D3DERR_INVALIDCALL, 5);
+    if (i >= mode_count()) RET(D3DERR_INVALIDCALL, 5);
     uint32_t w, h;
     bridge_scaled_mode(i, &w, &h);
     M32(p) = w;
@@ -296,6 +359,8 @@ void B_IDirect3D9_CreateDevice(CPU *c) {
     HRESULT hr = d3d->CreateDevice(ARG(1), (D3DDEVTYPE)ARG(2), (HWND)platform_window(), flags, &pp, &dev);
     rt_host_affinity_end();
     pp_to_guest(&pp, ARG(5));
+    if (SUCCEEDED(hr)) { g_bb_w = pp.BackBufferWidth; g_bb_h = pp.BackBufferHeight; }
+    if (SUCCEEDED(hr)) { extern void hud_screen_device(IDirect3DDevice9 *); hud_screen_device(dev); }
     if (ARG(6)) M32(ARG(6)) = SUCCEEDED(hr) ? d3d9_wrap(dev, IFACE_IDirect3DDevice9) : 0;
     LOG("CreateDevice -> %08x", (uint32_t)hr);
     RET(hr, 7);
@@ -329,10 +394,12 @@ void B_IDirect3DDevice9_Reset(CPU *c) {
     auto *d = (IDirect3DDevice9 *)com_host(ARG(0));
     D3DPRESENT_PARAMETERS pp;
     pp_from_guest(ARG(1), &pp);
+    { extern void hud_screen_reset(void); hud_screen_reset(); }
     rt_host_affinity_begin();
     HRESULT hr = d->Reset(&pp);
     rt_host_affinity_end();
     pp_to_guest(&pp, ARG(1));
+    if (SUCCEEDED(hr)) { g_bb_w = pp.BackBufferWidth; g_bb_h = pp.BackBufferHeight; }
     LOG("Reset %ux%u -> %08x", pp.BackBufferWidth, pp.BackBufferHeight, (uint32_t)hr);
     RET(hr, 2);
 }
@@ -380,8 +447,27 @@ static void bisect_present(void) {
     g_bisect = g_frame >= g_bisect_from && g_frame < g_bisect_from + 160;
 }
 
+/* TEOFIS (end-of-frame image space): when save/teofis.txt exists, write 0 to
+ * the game's end-of-frame image-space byte on every present. The byte is at
+ * guest offset 0x12cfad0. Turning it off skips tonemapping, bloom, colour
+ * grading and depth of field - a large GPU saving - and also fixes the black
+ * world map and the solid-colour underwater screen. */
+static int g_teofis = -1;
+static void apply_teofis() {
+    if (g_teofis < 0) {
+        extern char g_save_dir[];
+        char path[1100];
+        snprintf(path, sizeof path, "%s/teofis.txt", g_save_dir);
+        g_teofis = access(path, F_OK) == 0;
+        if (g_teofis)
+            LOG("eofis: end-of-frame image space disabled (save/teofis.txt)");
+    }
+    if (g_teofis) M8(0x12cfad0) = 0;
+}
+
 void B_IDirect3DDevice9_Present(CPU *c) {
     auto *d = (IDirect3DDevice9 *)com_host(ARG(0));
+    apply_teofis();
     if (g_trace_from < 0) {
         const char *e = getenv("LB_D3DTRACE");
         g_trace_from = 1 << 30;
@@ -392,8 +478,10 @@ void B_IDirect3DDevice9_Present(CPU *c) {
     if (g_d3d_trace) fprintf(stderr, "D3D %d Present\n", g_frame);
     extern void touch_draw(IDirect3DDevice9 *d);
     touch_draw(d);
-    HRESULT hr = d->Present((const RECT *)GPTR(ARG(1)), (const RECT *)GPTR(ARG(2)), nullptr,
-                            (const RGNDATA *)GPTR(ARG(4)));
+    { extern void hud_screen_present(IDirect3DDevice9 *); hud_screen_present(d); }
+    RECT vr = view_rect();
+    const RECT *dst = ARG(2) ? (const RECT *)GPTR(ARG(2)) : (vr.left || vr.top) ? &vr : nullptr;
+    HRESULT hr = d->Present((const RECT *)GPTR(ARG(1)), dst, nullptr, (const RGNDATA *)GPTR(ARG(4)));
     platform_present_hook();
     bisect_present();
     RET(hr, 5);
@@ -407,8 +495,10 @@ void B_IDirect3DDevice9_GetNPatchMode(CPU *c) {
 
 void B_IDirect3DSwapChain9_Present(CPU *c) {
     auto *s = (IDirect3DSwapChain9 *)com_host(ARG(0));
-    HRESULT hr = s->Present((const RECT *)GPTR(ARG(1)), (const RECT *)GPTR(ARG(2)), nullptr,
-                            (const RGNDATA *)GPTR(ARG(4)), ARG(5));
+    apply_teofis();
+    RECT vr = view_rect();
+    const RECT *dst = ARG(2) ? (const RECT *)GPTR(ARG(2)) : (vr.left || vr.top) ? &vr : nullptr;
+    HRESULT hr = s->Present((const RECT *)GPTR(ARG(1)), dst, nullptr, (const RGNDATA *)GPTR(ARG(4)), ARG(5));
     platform_present_hook();
     RET(hr, 6);
 }

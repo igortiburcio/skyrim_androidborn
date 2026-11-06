@@ -2,7 +2,16 @@
 
 namespace dxvk::vk {
 
-  static const PFN_vkGetInstanceProcAddr GetInstanceProcAddr = vkGetInstanceProcAddr;
+  static PFN_vkGetInstanceProcAddr GetInstanceProcAddr = vkGetInstanceProcAddr;
+
+  PFN_vkGetInstanceProcAddr getVulkanLoader() {
+    return GetInstanceProcAddr;
+  }
+
+  void setVulkanLoader(PFN_vkGetInstanceProcAddr fn) {
+    if (fn)
+      GetInstanceProcAddr = fn;
+  }
 
   PFN_vkVoidFunction LibraryLoader::sym(const char* name) const {
     return dxvk::vk::GetInstanceProcAddr(nullptr, name);
@@ -48,4 +57,10 @@ namespace dxvk::vk {
       this->vkDestroyDevice(m_device, nullptr);
   }
   
+}
+
+/* Called by the runtime after libadrenotools loaded a custom Vulkan driver:
+ * every instance and device dxvk creates then goes through that loader. */
+extern "C" void skyrim_set_vulkan_loader(void* fn) {
+  dxvk::vk::setVulkanLoader(reinterpret_cast<PFN_vkGetInstanceProcAddr>(fn));
 }

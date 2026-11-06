@@ -6,43 +6,6 @@
 
 namespace dxvk {
   
-  DxvkShaderConstData::DxvkShaderConstData()
-  : m_size(0), m_data(nullptr) {
-
-  }
-
-
-  DxvkShaderConstData::DxvkShaderConstData(
-          size_t                dwordCount,
-    const uint32_t*             dwordArray)
-  : m_size(dwordCount), m_data(new uint32_t[dwordCount]) {
-    for (size_t i = 0; i < dwordCount; i++)
-      m_data[i] = dwordArray[i];
-  }
-
-
-  DxvkShaderConstData::DxvkShaderConstData(DxvkShaderConstData&& other)
-  : m_size(other.m_size), m_data(other.m_data) {
-    other.m_size = 0;
-    other.m_data = nullptr;
-  }
-
-
-  DxvkShaderConstData& DxvkShaderConstData::operator = (DxvkShaderConstData&& other) {
-    delete[] m_data;
-    this->m_size = other.m_size;
-    this->m_data = other.m_data;
-    other.m_size = 0;
-    other.m_data = nullptr;
-    return *this;
-  }
-
-
-  DxvkShaderConstData::~DxvkShaderConstData() {
-    delete[] m_data;
-  }
-
-
   DxvkShaderModule::DxvkShaderModule()
   : m_vkd(nullptr), m_stage() {
 
@@ -64,7 +27,7 @@ namespace dxvk {
     m_stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     m_stage.pNext = nullptr;
     m_stage.flags = 0;
-    m_stage.stage = shader->stage();
+    m_stage.stage = shader->info().stage;
     m_stage.module = VK_NULL_HANDLE;
     m_stage.pName = "main";
     m_stage.pSpecializationInfo = nullptr;
@@ -98,21 +61,30 @@ namespace dxvk {
 
 
   DxvkShader::DxvkShader(
-          VkShaderStageFlagBits   stage,
-          uint32_t                slotCount,
-    const DxvkResourceSlot*       slotInfos,
-    const DxvkInterfaceSlots&     iface,
-          SpirvCodeBuffer         code,
-    const DxvkShaderOptions&      options,
-          DxvkShaderConstData&&   constData)
-  : m_stage(stage), m_code(code), m_interface(iface),
-    m_options(options), m_constData(std::move(constData)) {
-    // Write back resource slot infos
-    for (uint32_t i = 0; i < slotCount; i++)
-      m_slots.push_back(slotInfos[i]);
-    
-    // Gather the offsets where the binding IDs
-    // are stored so we can quickly remap them.
+    const DxvkShaderCreateInfo&   info,
+          SpirvCodeBuffer&&       spirv)
+  : m_info(info), m_code(spirv) {
+    m_info.resourceSlots = nullptr;
+    m_info.uniformData = nullptr;
+
+    // Copy resource binding slot infos
+    if (info.resourceSlotCount) {
+      m_slots.resize(info.resourceSlotCount);
+      for (uint32_t i = 0; i < info.resourceSlotCount; i++)
+        m_slots[i] = info.resourceSlots[i];
+      m_info.resourceSlots = m_slots.data();
+    }
+
+    // Copy uniform buffer data
+    if (info.uniformSize) {
+      m_uniformData.resize(info.uniformSize);
+      std::memcpy(m_uniformData.data(), info.uniformData, info.uniformSize);
+      m_info.uniformData = m_uniformData.data();
+    }
+
+    // Run an analysis pass over the SPIR-V code to gather some
+    // info that we may need during pipeline compilation.
+    SpirvCodeBuffer code = std::move(spirv);
     uint32_t o1VarId = 0;
     
     for (auto ins : code) {
@@ -147,8 +119,8 @@ namespace dxvk {
       }
     }
   }
-  
-  
+
+
   DxvkShader::~DxvkShader() {
     
   }
@@ -157,12 +129,12 @@ namespace dxvk {
   void DxvkShader::defineResourceSlots(
           DxvkDescriptorSlotMapping& mapping) const {
     for (const auto& slot : m_slots)
-      mapping.defineSlot(m_stage, slot);
+      mapping.defineSlot(m_info.stage, slot);
     
-    if (m_interface.pushConstSize) {
-      mapping.definePushConstRange(m_stage,
-        m_interface.pushConstOffset,
-        m_interface.pushConstSize);
+    if (m_info.pushConstSize) {
+      mapping.definePushConstRange(m_info.stage,
+        m_info.pushConstOffset,
+        m_info.pushConstSize);
     }
   }
   
@@ -346,16 +318,37 @@ namespace dxvk {
       }
     }
 
-    // Remove location declarations
-    for (auto ins : code) {
-      if (ins.opCode() == spv::OpDecorate
-       && ins.arg(2) == spv::DecorationLocation
-       && ins.arg(1) == inputVarId) {
-        code.beginInsertion(ins.offset());
-        code.erase(4);
-        code.endInsertion();
-        break;
+    // Remove location and other declarations
+    for (auto iter = code.begin(); iter != code.end(); ) {
+      auto ins = *(iter++);
+
+      if (ins.opCode() == spv::OpDecorate && ins.arg(1) == inputVarId) {
+        uint32_t numWords;
+
+        switch (ins.arg(2)) {
+          case spv::DecorationLocation:
+          case spv::DecorationFlat:
+          case spv::DecorationNoPerspective:
+          case spv::DecorationCentroid:
+          case spv::DecorationPatch:
+          case spv::DecorationSample:
+            numWords = ins.length();
+            break;
+
+          default:
+            numWords = 0;
+        }
+
+        if (numWords) {
+          code.beginInsertion(ins.offset());
+          code.erase(numWords);
+
+          iter = SpirvInstructionIterator(code.data(), code.endInsertion(), code.dwords());
+        }
       }
+
+      if (ins.opCode() == spv::OpFunction)
+        break;
     }
 
     // Fix up pointer types used in access chain instructions

@@ -10,8 +10,11 @@ namespace dxvk::util {
    * \param [in] shaderStages Shader stage flags
    * \returns Corresponding pipeline stage flags
    */
-  VkPipelineStageFlags pipelineStages(
-          VkShaderStageFlags shaderStages);
+  inline VkPipelineStageFlags pipelineStages(
+          VkShaderStageFlags shaderStages) {
+    return (shaderStages & VK_SHADER_STAGE_ALL_GRAPHICS) << 3
+         | (shaderStages & VK_SHADER_STAGE_COMPUTE_BIT) << 6;
+  }
   
   /**
    * \brief Computes number of mip levels for an image
@@ -132,7 +135,21 @@ namespace dxvk::util {
     size.depth  = std::max(1u, size.depth  >> level);
     return size;
   }
-  
+
+  /**
+   * \brief Computes offset in a given mip level
+   *
+   * \param [in] size Base mip level offset
+   * \param [in] level mip level to compute
+   * \returns Offset on the given mip level
+   */
+  inline VkOffset3D computeMipLevelOffset(VkOffset3D offset, uint32_t level) {
+    offset.x  = offset.x >> level;
+    offset.y  = offset.y >> level;
+    offset.z  = offset.z >> level;
+    return offset;
+  }
+
   /**
    * \brief Computes mip level extent
    *

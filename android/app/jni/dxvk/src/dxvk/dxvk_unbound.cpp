@@ -53,6 +53,7 @@ namespace dxvk {
     info.compareOp      = VK_COMPARE_OP_NEVER;
     info.borderColor    = VkClearColorValue();
     info.usePixelCoord  = VK_FALSE;
+    info.nonSeamless    = VK_FALSE;
     
     return dev->createSampler(info);
   }
@@ -179,19 +180,19 @@ namespace dxvk {
   void DxvkUnboundResources::clearBuffer(
     const Rc<DxvkContext>&  ctx,
     const Rc<DxvkBuffer>&   buffer) {
-    ctx->clearBuffer(buffer, 0, buffer->info().size, 0);
+    ctx->initBuffer(buffer);
   }
   
   
   void DxvkUnboundResources::clearImage(
     const Rc<DxvkContext>&  ctx,
     const Rc<DxvkImage>&    image) {
-    ctx->clearColorImage(image,
-      VkClearColorValue { },
+    ctx->initImage(image,
       VkImageSubresourceRange {
         VK_IMAGE_ASPECT_COLOR_BIT,
         0, image->info().mipLevels,
-        0, image->info().numLayers });
+        0, image->info().numLayers },
+      VK_IMAGE_LAYOUT_UNDEFINED);
   }
   
 }

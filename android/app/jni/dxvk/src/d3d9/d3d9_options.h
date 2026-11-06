@@ -3,9 +3,13 @@
 #include "../util/config/config.h"
 #include "../dxvk/dxvk_device.h"
 
-#include "d3d9_include.h"
-
 namespace dxvk {
+
+  enum class D3D9FloatEmulation {
+    Disabled,
+    Enabled,
+    Strict
+  };
 
   struct D3D9Options {
 
@@ -83,7 +87,7 @@ namespace dxvk {
     uint32_t maxAvailableMemory;
 
     /// D3D9 Floating Point Emulation (anything * 0 = 0)
-    bool d3d9FloatEmulation;
+    D3D9FloatEmulation d3d9FloatEmulation;
 
     /// Support the DF16 & DF24 texture format
     bool supportDFFormats;
@@ -93,11 +97,6 @@ namespace dxvk {
 
     /// Support D32
     bool supportD32;
-
-    /// SWVP Constant Limits
-    int32_t swvpFloatCount;
-    int32_t swvpIntCount;
-    int32_t swvpBoolCount;
 
     /// Disable D3DFMT_A8 for render targets.
     /// Specifically to work around a game
@@ -155,6 +154,12 @@ namespace dxvk {
 
     /// Use device local memory for constant buffers.
     bool deviceLocalConstantBuffers;
+
+    /// Disable direct buffer mapping
+    bool allowDirectBufferMapping;
+
+    /// Don't use non seamless cube maps
+    bool seamlessCubes;
   };
 
 }

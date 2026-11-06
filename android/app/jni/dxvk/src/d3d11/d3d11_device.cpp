@@ -12,6 +12,7 @@
 #include "d3d11_context_def.h"
 #include "d3d11_context_imm.h"
 #include "d3d11_device.h"
+#include "d3d11_fence.h"
 #include "d3d11_input_layout.h"
 #include "d3d11_interop.h"
 #include "d3d11_query.h"
@@ -22,6 +23,8 @@
 #include "d3d11_swapchain.h"
 #include "d3d11_texture.h"
 #include "d3d11_video.h"
+
+#include "../util/util_shared_res.h"
 
 namespace dxvk {
   
@@ -207,7 +210,7 @@ namespace dxvk {
       return S_FALSE;
     
     try {
-      Com<D3D11Texture2D> texture = new D3D11Texture2D(this, &desc);
+      Com<D3D11Texture2D> texture = new D3D11Texture2D(this, &desc, nullptr);
       m_initializer->InitTexture(texture->GetCommonTexture(), pInitialData);
       *ppTexture2D = texture.ref();
       return S_OK;
@@ -1345,16 +1348,17 @@ namespace dxvk {
   HRESULT STDMETHODCALLTYPE D3D11Device::CreateFence(
           UINT64                      InitialValue,
           D3D11_FENCE_FLAG            Flags,
-          REFIID                      ReturnedInterface,
+          REFIID                      riid,
           void**                      ppFence) {
     InitReturnPtr(ppFence);
 
-    static bool s_errorShown = false;
-
-    if (!std::exchange(s_errorShown, true))
-      Logger::err("D3D11Device::CreateFence: Not implemented");
-    
-    return E_NOTIMPL;
+    try {
+      Com<D3D11Fence> fence = new D3D11Fence(this, InitialValue, Flags, INVALID_HANDLE_VALUE);
+      return fence->QueryInterface(riid, ppFence);
+    } catch (const DxvkError& e) {
+      Logger::err(e.message());
+      return E_FAIL;
+    }
   }
 
 
@@ -1388,10 +1392,8 @@ namespace dxvk {
           HANDLE      hResource,
           REFIID      ReturnedInterface,
           void**      ppResource) {
-    InitReturnPtr(ppResource);
-    
-    Logger::err("D3D11Device::OpenSharedResource: Not implemented");
-    return E_NOTIMPL;
+    return OpenSharedResourceGeneric<true>(
+      hResource, ReturnedInterface, ppResource);
   }
   
   
@@ -1399,10 +1401,8 @@ namespace dxvk {
           HANDLE      hResource,
           REFIID      ReturnedInterface,
           void**      ppResource) {
-    InitReturnPtr(ppResource);
-    
-    Logger::err("D3D11Device::OpenSharedResource1: Not implemented");
-    return E_NOTIMPL;
+    return OpenSharedResourceGeneric<false>(
+      hResource, ReturnedInterface, ppResource);
   }
 
   
@@ -1424,8 +1424,16 @@ namespace dxvk {
           void**      ppFence) {
     InitReturnPtr(ppFence);
 
-    Logger::err("D3D11Device::OpenSharedFence: Not implemented");
-    return E_NOTIMPL;
+    if (ppFence == nullptr)
+      return S_FALSE;
+
+    try {
+      Com<D3D11Fence> fence = new D3D11Fence(this, 0, D3D11_FENCE_FLAG_SHARED, hFence);
+      return fence->QueryInterface(ReturnedInterface, ppFence);
+    } catch (const DxvkError& e) {
+      Logger::err(e.message());
+      return E_FAIL;
+    }
   }
 
 
@@ -1929,6 +1937,8 @@ namespace dxvk {
 
     enabled.shaderDrawParameters.shaderDrawParameters             = VK_TRUE;
 
+    enabled.khrTimelineSemaphore.timelineSemaphore                = supported.khrTimelineSemaphore.timelineSemaphore;
+
     enabled.extMemoryPriority.memoryPriority                      = supported.extMemoryPriority.memoryPriority;
 
     enabled.extRobustness2.robustBufferAccess2                    = supported.extRobustness2.robustBufferAccess2;
@@ -1956,7 +1966,7 @@ namespace dxvk {
       enabled.core.features.shaderCullDistance                    = VK_TRUE;
       enabled.core.features.textureCompressionBC                  = VK_TRUE;
       enabled.extDepthClipEnable.depthClipEnable                  = supported.extDepthClipEnable.depthClipEnable;
-      enabled.extHostQueryReset.hostQueryReset                    = supported.extHostQueryReset.hostQueryReset;
+      enabled.extHostQueryReset.hostQueryReset                    = VK_TRUE;
     }
     
     if (featureLevel >= D3D_FEATURE_LEVEL_9_2) {
@@ -2257,6 +2267,61 @@ namespace dxvk {
     }
 
     return ~0u;
+  }
+
+
+  template<bool IsKmtHandle>
+  HRESULT D3D11Device::OpenSharedResourceGeneric(
+          HANDLE      hResource,
+          REFIID      ReturnedInterface,
+          void**      ppResource) {
+    InitReturnPtr(ppResource);
+
+    if (ppResource == nullptr)
+      return S_FALSE;
+
+    HANDLE ntHandle = IsKmtHandle ? openKmtHandle(hResource) : hResource;
+
+    if (ntHandle == INVALID_HANDLE_VALUE) {
+      Logger::warn(str::format("D3D11Device::OpenSharedResourceGeneric: Handle not found: ", hResource));
+      return E_INVALIDARG;
+    }
+
+    DxvkSharedTextureMetadata metadata;
+    bool ret = getSharedMetadata(ntHandle, &metadata, sizeof(metadata), NULL);
+
+    if (IsKmtHandle)
+      ::CloseHandle(ntHandle);
+
+    if (!ret) {
+      Logger::warn("D3D11Device::OpenSharedResourceGeneric: Failed to get shared resource info for a texture");
+      return E_INVALIDARG;
+    }
+
+    D3D11_COMMON_TEXTURE_DESC d3d11Desc;
+    d3d11Desc.Width          = metadata.Width;
+    d3d11Desc.Height         = metadata.Height;
+    d3d11Desc.Depth          = 1,
+    d3d11Desc.MipLevels      = metadata.MipLevels;
+    d3d11Desc.ArraySize      = metadata.ArraySize;
+    d3d11Desc.Format         = metadata.Format;
+    d3d11Desc.SampleDesc     = metadata.SampleDesc;
+    d3d11Desc.Usage          = metadata.Usage;
+    d3d11Desc.BindFlags      = metadata.BindFlags;
+    d3d11Desc.CPUAccessFlags = metadata.CPUAccessFlags;
+    d3d11Desc.MiscFlags      = metadata.MiscFlags;
+    d3d11Desc.TextureLayout  = metadata.TextureLayout;
+
+    // Only 2D textures may be shared
+    try {
+      const Com<D3D11Texture2D> texture = new D3D11Texture2D(this, &d3d11Desc, hResource);
+      texture->QueryInterface(ReturnedInterface, ppResource);
+      return S_OK;
+    }
+    catch (const DxvkError& e) {
+      Logger::err(e.message());
+      return E_INVALIDARG;
+    }
   }
 
 

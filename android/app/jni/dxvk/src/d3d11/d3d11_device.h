@@ -260,7 +260,7 @@ namespace dxvk {
     HRESULT STDMETHODCALLTYPE CreateFence(
             UINT64                      InitialValue,
             D3D11_FENCE_FLAG            Flags,
-            REFIID                      ReturnedInterface,
+            REFIID                      riid,
             void**                      ppFence);
 
     void STDMETHODCALLTYPE ReadFromSubresource(
@@ -472,6 +472,12 @@ namespace dxvk {
     BOOL GetImageTypeSupport(
             VkFormat    Format,
             VkImageType Type) const;
+
+    template<bool IsKmtHandle>
+    HRESULT OpenSharedResourceGeneric(
+            HANDLE      hResource,
+            REFIID      ReturnedInterface,
+            void**      ppResource);
 
     uint32_t GetViewPlaneIndex(
             ID3D11Resource*         pResource,

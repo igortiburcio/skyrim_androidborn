@@ -163,8 +163,15 @@ namespace dxvk {
     } else
 #endif
     {
-      // Assume 1ms sleep granularity by default
-      m_sleepGranularity = NtTimerDuration(10000);
+      /* Zero both. The upstream 1 ms assumption makes sleep() chunk the wait
+       * and then busy-wait a fixed ~4 ms + period/6 tail on every frame - on
+       * this device that spun the presentation thread for a third of each
+       * frame, burned half a core competing with the game thread and dragged
+       * the 30 fps cap down to 15. With both zero, sleep() issues a single
+       * sleep_for for the whole period, and the busy-wait loop never runs
+       * because nanosleep never wakes early on this platform. */
+      m_sleepGranularity = NtTimerDuration::zero();
+      m_sleepThreshold   = NtTimerDuration::zero();
     }
 
     m_sleepThreshold = 4 * m_sleepGranularity;

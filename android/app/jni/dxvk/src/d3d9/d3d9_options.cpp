@@ -1,7 +1,6 @@
 #include "d3d9_options.h"
 
 #include "d3d9_caps.h"
-#include "d3d9_config.h"
 
 namespace dxvk {
 
@@ -57,11 +56,8 @@ namespace dxvk {
     this->supportDFFormats              = config.getOption<bool>        ("d3d9.supportDFFormats",              true);
     this->supportX4R4G4B4               = config.getOption<bool>        ("d3d9.supportX4R4G4B4",               true);
     this->supportD32                    = config.getOption<bool>        ("d3d9.supportD32",                    true);
-    this->swvpFloatCount                = config.getOption<int32_t>     ("d3d9.swvpFloatCount",                caps::MaxFloatConstantsSoftware);
-    this->swvpIntCount                  = config.getOption<int32_t>     ("d3d9.swvpIntCount",                  caps::MaxOtherConstantsSoftware);
-    this->swvpBoolCount                 = config.getOption<int32_t>     ("d3d9.swvpBoolCount",                 caps::MaxOtherConstantsSoftware);
     this->disableA8RT                   = config.getOption<bool>        ("d3d9.disableA8RT",                   false);
-    this->invariantPosition             = config.getOption<bool>        ("d3d9.invariantPosition",             false);
+    this->invariantPosition             = config.getOption<bool>        ("d3d9.invariantPosition",             true);
     this->memoryTrackTest               = config.getOption<bool>        ("d3d9.memoryTrackTest",               false);
     this->supportVCache                 = config.getOption<bool>        ("d3d9.supportVCache",                 vendorId == 0x10de);
     this->enableDialogMode              = config.getOption<bool>        ("d3d9.enableDialogMode",              false);
@@ -76,6 +72,8 @@ namespace dxvk {
     this->alphaTestWiggleRoom           = config.getOption<bool>        ("d3d9.alphaTestWiggleRoom",           false);
     this->apitraceMode                  = config.getOption<bool>        ("d3d9.apitraceMode",                  false);
     this->deviceLocalConstantBuffers    = config.getOption<bool>        ("d3d9.deviceLocalConstantBuffers",    false);
+    this->allowDirectBufferMapping      = config.getOption<bool>        ("d3d9.allowDirectBufferMapping",      true);
+    this->seamlessCubes                 = config.getOption<bool>        ("d3d9.seamlessCubes",                 false);
 
     // If we are not Nvidia, enable general hazards.
     this->generalHazards = adapter != nullptr
@@ -85,8 +83,21 @@ namespace dxvk {
                             0, 0);
     applyTristate(this->generalHazards, config.getOption<Tristate>("d3d9.generalHazards", Tristate::Auto));
 
-    this->d3d9FloatEmulation = config::FloatEmulationByDefault; // <-- Future Extension?
-    applyTristate(this->d3d9FloatEmulation, config.getOption<Tristate>("d3d9.floatEmulation", Tristate::Auto));
+    std::string floatEmulation = Config::toLower(config.getOption<std::string>("d3d9.floatEmulation", "auto"));
+    if (floatEmulation == "strict") {
+      d3d9FloatEmulation = D3D9FloatEmulation::Strict;
+    } else if (floatEmulation == "false") {
+      d3d9FloatEmulation = D3D9FloatEmulation::Disabled;
+    } else if (floatEmulation == "true") {
+      d3d9FloatEmulation = D3D9FloatEmulation::Enabled;
+    } else {
+      bool hasMulz = adapter != nullptr
+                  && adapter->matchesDriver(DxvkGpuVendor::Amd,
+                                            VK_DRIVER_ID_MESA_RADV,
+                                            VK_MAKE_VERSION(21, 99, 99),
+                                            0);
+      d3d9FloatEmulation = hasMulz ? D3D9FloatEmulation::Strict : D3D9FloatEmulation::Enabled;
+    }
   }
 
 }

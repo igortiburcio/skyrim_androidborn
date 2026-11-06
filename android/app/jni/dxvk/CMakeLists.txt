@@ -1,7 +1,9 @@
-# dxvk-native D3D9 (native-1.9.2b, patched for mobile GPUs). Source list and
-# generated shader headers come from a desktop meson build (tools/make_android.py).
+# dxvk-native D3D9 (native-1.9.2b -> dxvk v1.10.3 rebase, patched for mobile GPUs).
+# Source list comes from the fork's meson lists (Linux/SDL2 variant); shader
+# headers are generated with glslangValidator (see generated/).
 add_library(dxvk_d3d9 SHARED
     src/d3d9/d3d9_adapter.cpp
+    src/d3d9/d3d9_annotation.cpp
     src/d3d9/d3d9_buffer.cpp
     src/d3d9/d3d9_common_buffer.cpp
     src/d3d9/d3d9_common_texture.cpp
@@ -55,6 +57,7 @@ add_library(dxvk_d3d9 SHARED
     src/dxvk/dxvk_device.cpp
     src/dxvk/dxvk_device_filter.cpp
     src/dxvk/dxvk_extensions.cpp
+    src/dxvk/dxvk_fence.cpp
     src/dxvk/dxvk_format.cpp
     src/dxvk/dxvk_framebuffer.cpp
     src/dxvk/dxvk_gpu_event.cpp
@@ -63,7 +66,6 @@ add_library(dxvk_d3d9 SHARED
     src/dxvk/dxvk_image.cpp
     src/dxvk/dxvk_instance.cpp
     src/dxvk/dxvk_lifetime.cpp
-    src/dxvk/dxvk_main.cpp
     src/dxvk/dxvk_memory.cpp
     src/dxvk/dxvk_meta_blit.cpp
     src/dxvk/dxvk_meta_clear.cpp
@@ -73,6 +75,7 @@ add_library(dxvk_d3d9 SHARED
     src/dxvk/dxvk_meta_resolve.cpp
     src/dxvk/dxvk_options.cpp
     src/dxvk/dxvk_pipecache.cpp
+    src/dxvk/dxvk_pipecompiler.cpp
     src/dxvk/dxvk_pipelayout.cpp
     src/dxvk/dxvk_pipemanager.cpp
     src/dxvk/dxvk_queue.cpp
@@ -102,22 +105,24 @@ add_library(dxvk_d3d9 SHARED
     src/util/config/config.cpp
     src/util/log/log.cpp
     src/util/log/log_debug.cpp
-    src/util/platform/thread_native.cpp
     src/util/platform/util_env_linux.cpp
     src/util/platform/util_luid_linux.cpp
     src/util/platform/util_string_linux.cpp
     src/util/sha1/sha1.c
     src/util/sha1/sha1_util.cpp
     src/util/sync/sync_recursive.cpp
+    src/util/thread.cpp
     src/util/util_env.cpp
     src/util/util_fps_limiter.cpp
     src/util/util_matrix.cpp
     src/util/util_monitor.cpp
+    src/util/util_shared_res.cpp
     src/vulkan/vulkan_loader.cpp
     src/vulkan/vulkan_names.cpp
     src/vulkan/vulkan_presenter.cpp
     src/wsi/sdl2/wsi_mode_sdl2.cpp
     src/wsi/sdl2/wsi_monitor_sdl2.cpp
+    src/wsi/sdl2/wsi_native_surface.cpp
     src/wsi/sdl2/wsi_presenter_sdl2.cpp
     src/wsi/sdl2/wsi_window_sdl2.cpp)
 target_include_directories(dxvk_d3d9 PRIVATE

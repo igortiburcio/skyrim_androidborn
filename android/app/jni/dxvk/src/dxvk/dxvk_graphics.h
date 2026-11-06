@@ -1,6 +1,9 @@
 #pragma once
 
+#include <atomic>
 #include <mutex>
+
+#include "../util/sync/sync_list.h"
 
 #include "dxvk_bind_mask.h"
 #include "dxvk_constant_state.h"
@@ -53,6 +56,18 @@ namespace dxvk {
       state.add(DxvkShader::getHash(fs));
       return state;
     }
+
+    bool validate() const {
+      return validateShaderType(vs, VK_SHADER_STAGE_VERTEX_BIT)
+          && validateShaderType(tcs, VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT)
+          && validateShaderType(tes, VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT)
+          && validateShaderType(gs, VK_SHADER_STAGE_GEOMETRY_BIT)
+          && validateShaderType(fs, VK_SHADER_STAGE_FRAGMENT_BIT);
+    }
+
+    static bool validateShaderType(const Rc<DxvkShader>& shader, VkShaderStageFlagBits stage) {
+      return shader == nullptr || shader->info().stage == stage;
+    }
   };
   
   
@@ -80,7 +95,7 @@ namespace dxvk {
 
     DxvkGraphicsPipelineInstance()
     : m_stateVector (),
-      m_renderPass  (VK_NULL_HANDLE),
+      m_renderPass  (nullptr),
       m_pipeline    (VK_NULL_HANDLE) { }
 
     DxvkGraphicsPipelineInstance(
@@ -110,14 +125,24 @@ namespace dxvk {
      * \returns The pipeline handle
      */
     VkPipeline pipeline() const {
-      return m_pipeline;
+      return m_pipeline.load(std::memory_order_acquire);
+    }
+
+    /**
+     * \brief Stores a compiled pipeline handle
+     *
+     * Called by an async compiler worker once the pipeline is
+     * ready; reads of the handle see it with acquire semantics.
+     */
+    void setPipeline(VkPipeline pipeline) {
+      m_pipeline.store(pipeline, std::memory_order_release);
     }
 
   private:
 
     DxvkGraphicsPipelineStateInfo m_stateVector;
     const DxvkRenderPass*         m_renderPass;
-    VkPipeline                    m_pipeline;
+    std::atomic<VkPipeline>       m_pipeline;
 
   };
 
@@ -203,6 +228,19 @@ namespace dxvk {
       const DxvkGraphicsPipelineStateInfo&    state,
       const DxvkRenderPass*                   renderPass);
     
+    /**
+     * \brief Compiles a pipeline instance in the background
+     *
+     * Called on an async compiler thread for an instance that was created
+     * with a null handle. The draw that needed it is skipped until the
+     * handle is stored, so new shader combinations appear a frame or two
+     * later instead of stalling the frame.
+     */
+    void compileInstanceAsync(
+            DxvkGraphicsPipelineInstance*      instance,
+      const DxvkGraphicsPipelineStateInfo&     state,
+      const DxvkRenderPass*                    renderPass);
+    
   private:
     
     Rc<vk::DeviceFn>            m_vkd;
@@ -220,8 +258,9 @@ namespace dxvk {
     DxvkGraphicsCommonPipelineStateInfo m_common;
     
     // List of pipeline instances, shared between threads
-    alignas(CACHE_LINE_SIZE) sync::Spinlock   m_mutex;
-    std::vector<DxvkGraphicsPipelineInstance> m_pipelines;
+    alignas(CACHE_LINE_SIZE)
+    dxvk::mutex                               m_mutex;
+    sync::List<DxvkGraphicsPipelineInstance>  m_pipelines;
     
     DxvkGraphicsPipelineInstance* createInstance(
       const DxvkGraphicsPipelineStateInfo& state,
@@ -246,7 +285,8 @@ namespace dxvk {
             VkShaderStageFlagBits          stage) const;
 
     bool validatePipelineState(
-      const DxvkGraphicsPipelineStateInfo& state) const;
+      const DxvkGraphicsPipelineStateInfo& state,
+            bool                           trusted) const;
     
     void writePipelineStateToCache(
       const DxvkGraphicsPipelineStateInfo& state,

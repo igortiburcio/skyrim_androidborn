@@ -5,6 +5,7 @@
 #include "dxvk_bind_mask.h"
 #include "dxvk_buffer.h"
 #include "dxvk_descriptor.h"
+#include "dxvk_fence.h"
 #include "dxvk_gpu_event.h"
 #include "dxvk_gpu_query.h"
 #include "dxvk_lifetime.h"
@@ -38,13 +39,32 @@ namespace dxvk {
    * only, array sizes are based on need.
    */
   struct DxvkQueueSubmission {
-    uint32_t              waitCount;
-    VkSemaphore           waitSync[2];
-    VkPipelineStageFlags  waitMask[2];
-    uint32_t              wakeCount;
-    VkSemaphore           wakeSync[2];
-    uint32_t              cmdBufferCount;
-    VkCommandBuffer       cmdBuffers[4];
+    std::vector<VkSemaphore> waitSync;
+    std::vector<VkPipelineStageFlags> waitMask;
+    std::vector<uint64_t> waitValues;
+    std::vector<VkSemaphore> wakeSync;
+    std::vector<uint64_t> wakeValues;
+    std::vector<VkCommandBuffer> cmdBuffers;
+
+    void addWaitSemaphore(VkSemaphore semaphore, uint64_t value, VkPipelineStageFlags stageMask) {
+      waitSync.push_back(semaphore);
+      waitMask.push_back(stageMask);
+      waitValues.push_back(value);
+    }
+
+    void addWakeSemaphore(VkSemaphore semaphore, uint64_t value) {
+      wakeSync.push_back(semaphore);
+      wakeValues.push_back(value);
+    }
+
+    void reset() {
+      waitSync.clear();
+      waitMask.clear();
+      waitValues.clear();
+      wakeSync.clear();
+      wakeValues.clear();
+      cmdBuffers.clear();
+    }
   };
 
   /**
@@ -102,7 +122,7 @@ namespace dxvk {
      * \param [in] ctr The counter to increment
      * \param [in] val The value to add
      */
-    void addStatCtr(DxvkStatCounter ctr, uint32_t val) {
+    void addStatCtr(DxvkStatCounter ctr, uint64_t val) {
       m_statCounters.addCtr(ctr, val);
     }
     
@@ -194,10 +214,31 @@ namespace dxvk {
     }
 
     /**
-     * \brief Notifies signals
+     * \brief Notifies resources and signals
      */
-    void notifySignals() {
+    void notifyObjects() {
+      m_resources.notify();
       m_signalTracker.notify();
+    }
+    
+    /**
+     * \brief Waits for fence
+     *
+     * \param [in] fence Fence to wait on
+     * \param [in] value Value to wait for
+     */
+    void waitFence(Rc<DxvkFence> fence, uint64_t value) {
+      m_waitSemaphores.emplace_back(std::move(fence), value);
+    }
+    
+    /**
+     * \brief Signals fence
+     *
+     * \param [in] fence Fence to signal
+     * \param [in] value Value to signal to
+     */
+    void signalFence(Rc<DxvkFence> fence, uint64_t value) {
+      m_signalSemaphores.emplace_back(std::move(fence), value);
     }
     
     /**
@@ -598,11 +639,14 @@ namespace dxvk {
 
 
     void cmdFillBuffer(
+            DxvkCmdBuffer           cmdBuffer,
             VkBuffer                dstBuffer,
             VkDeviceSize            dstOffset,
             VkDeviceSize            size,
             uint32_t                data) {
-      m_vkd->vkCmdFillBuffer(m_execBuffer,
+      m_cmdBuffersUsed.set(cmdBuffer);
+
+      m_vkd->vkCmdFillBuffer(getCmdBuffer(cmdBuffer),
         dstBuffer, dstOffset, size, data);
     }
     
@@ -639,39 +683,6 @@ namespace dxvk {
     }
 
 
-    void cmdResetQuery(
-            VkQueryPool             queryPool,
-            uint32_t                queryId,
-            VkEvent                 event) {
-      if (event == VK_NULL_HANDLE) {
-        m_vkd->vkResetQueryPoolEXT(
-          m_vkd->device(), queryPool, queryId, 1);
-      } else {
-        m_cmdBuffersUsed.set(DxvkCmdBuffer::InitBuffer);
-
-        m_vkd->vkResetEvent(
-          m_vkd->device(), event);
-        
-        m_vkd->vkCmdResetQueryPool(
-          m_initBuffer, queryPool, queryId, 1);
-        
-        m_vkd->vkCmdSetEvent(m_initBuffer,
-          event, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
-      }
-    }
-    
-    
-    void cmdResetQueryPool(
-            VkQueryPool             queryPool,
-            uint32_t                firstQuery,
-            uint32_t                queryCount) {
-      m_cmdBuffersUsed.set(DxvkCmdBuffer::InitBuffer);
-      
-      m_vkd->vkCmdResetQueryPool(m_initBuffer,
-        queryPool, firstQuery, queryCount);
-    }
-    
-    
     void cmdResolveImage(
             VkImage                 srcImage,
             VkImageLayout           srcImageLayout,
@@ -771,6 +782,13 @@ namespace dxvk {
 
     void cmdInsertDebugUtilsLabel(VkDebugUtilsLabelEXT *pLabelInfo);
 
+    void resetQuery(
+            VkQueryPool             queryPool,
+            uint32_t                queryId) {
+      m_vkd->vkResetQueryPoolEXT(
+        m_vkd->device(), queryPool, queryId, 1);
+    }
+
   private:
     
     DxvkDevice*         m_device;
@@ -787,7 +805,7 @@ namespace dxvk {
     VkCommandBuffer     m_sdmaBuffer = VK_NULL_HANDLE;
 
     VkSemaphore         m_sdmaSemaphore = VK_NULL_HANDLE;
-    
+
     DxvkCmdBufferFlags  m_cmdBuffersUsed;
     DxvkLifetimeTracker m_resources;
     DxvkDescriptorPoolTracker m_descriptorPoolTracker;
@@ -796,6 +814,10 @@ namespace dxvk {
     DxvkGpuQueryTracker m_gpuQueryTracker;
     DxvkBufferTracker   m_bufferTracker;
     DxvkStatCounters    m_statCounters;
+    DxvkQueueSubmission m_submission;
+
+    std::vector<DxvkFenceValuePair> m_waitSemaphores;
+    std::vector<DxvkFenceValuePair> m_signalSemaphores;
 
     VkCommandBuffer getCmdBuffer(DxvkCmdBuffer cmdBuffer) const {
       if (cmdBuffer == DxvkCmdBuffer::ExecBuffer) return m_execBuffer;

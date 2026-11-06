@@ -27,7 +27,7 @@ namespace dxvk {
     /// Whether to emulate d3d9 float behaviour using clampps
     /// True:  Perform emulation to emulate behaviour (ie. anything * 0 = 0)
     /// False: Don't do anything.
-    bool d3d9FloatEmulation;
+    D3D9FloatEmulation d3d9FloatEmulation;
 
     /// Whether or not we should care about pow(0, 0) = 1
     bool strictPow;
@@ -43,8 +43,8 @@ namespace dxvk {
     /// Works around a game bug in Halo CE where it gives cube textures to 2d/volume samplers
     bool forceSamplerTypeSpecConstants;
 
-    /// Should the VS constant buffer be an SSBO (swvp on NV)
-    bool vertexConstantBufferAsSSBO;
+    /// Should the SWVP float constant buffer be a SSBO (because of the size on NV)
+    bool vertexFloatConstantBufferAsSSBO;
 
     /// Should we make our Mads a FFma or do it the long way with an FMul and an FAdd?
     /// This solves some rendering bugs in games that have z-pass shaders which
@@ -54,6 +54,9 @@ namespace dxvk {
     /// Workaround for games using alpha test == 1.0, etc due to wonky interpolation or
     /// misc. imprecision on some vendors
     bool alphaTestWiggleRoom;
+
+    /// Whether or not we can rely on robustness2 to handle oob constant access
+    bool robustness2Supported;
   };
 
 }

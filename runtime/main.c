@@ -440,6 +440,22 @@ int main(int argc, char **argv) {
     if (!getenv("DXVK_STATE_CACHE_PATH")) setenv("DXVK_STATE_CACHE_PATH", g_save_dir, 1);
     /* 0.2.6: no compile status HUD (as in 0.1.5); DXVK_HUD=portstatus enables it. */
     check_game_dir();
+    /* The launcher's empty switch files, read by dxvk: devicelock.txt puts
+     * the per-call D3D9 device lock back, noasync.txt compiles shaders in the
+     * frame instead of on worker threads. */
+    {
+        char sw[1100];
+        snprintf(sw, sizeof sw, "%s/devicelock.txt", g_save_dir);
+        if (access(sw, F_OK) == 0) setenv("LB_DEVICELOCK", "1", 1);
+        snprintf(sw, sizeof sw, "%s/noasync.txt", g_save_dir);
+        if (access(sw, F_OK) == 0) setenv("LB_NOASYNC", "1", 1);
+    }
+    /* The custom Vulkan driver must be installed before dxvk creates its
+     * instance (the first Direct3DCreate9). */
+    {
+        extern void skyrim_port_init_vulkan_driver(void);
+        skyrim_port_init_vulkan_driver();
+    }
 #ifdef GAME_MARVEL
     { extern void port_restore_defaults(void); port_restore_defaults(); }
 #endif
@@ -468,6 +484,7 @@ int main(int argc, char **argv) {
     load_pe(GAME_EXE, 0, GAME_EXE);
     extern void touch_setup_guest(void);
     touch_setup_guest();
+    { extern void hud_screen_setup_guest(void); hud_screen_setup_guest(); }
     for (int i = 0; i < ndll; i++) {
         uint32_t args[3] = {g_dll_bases[i], 1, 0};
         if (dll_entries[i] && !rt_invoke(c, dll_entries[i], 3, args))

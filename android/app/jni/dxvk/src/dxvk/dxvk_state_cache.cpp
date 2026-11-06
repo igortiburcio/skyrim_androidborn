@@ -150,11 +150,12 @@ namespace dxvk {
 
 
   DxvkStateCache::DxvkStateCache(
-    const DxvkDevice*           device,
+          DxvkDevice*           device,
           DxvkPipelineManager*  pipeManager,
           DxvkRenderPassPool*   passManager)
-  : m_pipeManager(pipeManager),
-    m_passManager(passManager) {
+  : m_device      (device),
+    m_pipeManager (pipeManager),
+    m_passManager (passManager) {
     bool newFile = !readCacheFile();
 
     if (newFile) {
@@ -184,32 +185,6 @@ namespace dxvk {
       for (auto& e : m_entries)
         writeCacheEntry(file, e);
     }
-
-    // Use half the available CPU cores for pipeline compilation
-    uint32_t numCpuCores = dxvk::thread::hardware_concurrency();
-    uint32_t numWorkers  = ((std::max(1u, numCpuCores) - 1) * 5) / 7;
-
-    if (numWorkers <  1) numWorkers =  1;
-    if (numWorkers > 32) numWorkers = 32;
-
-    if (device->config().numCompilerThreads > 0)
-      numWorkers = device->config().numCompilerThreads;
-    
-    Logger::info(str::format("DXVK: Using ", numWorkers, " compiler threads"));
-    
-    // Start the worker threads and the file writer
-    m_workerBusy.store(numWorkers);
-
-    for (uint32_t i = 0; i < numWorkers; i++) {
-      m_workerThreads.emplace_back([this] () { workerFunc(); });
-
-      // TODO: better solution for this.
-#ifndef DXVK_NATIVE
-      m_workerThreads[i].set_priority(ThreadPriority::Lowest);
-#endif
-    }
-    
-    m_writerThread = dxvk::thread([this] () { writerFunc(); });
   }
   
 
@@ -242,6 +217,8 @@ namespace dxvk {
       DxvkComputePipelineStateInfo(),
       format, g_nullHash });
     m_writerCond.notify_one();
+
+    createWriter();
   }
 
 
@@ -266,6 +243,8 @@ namespace dxvk {
       DxvkGraphicsPipelineStateInfo(), state,
       DxvkRenderPassFormat(), g_nullHash });
     m_writerCond.notify_one();
+
+    createWriter();
   }
 
 
@@ -301,8 +280,10 @@ namespace dxvk {
       m_workerQueue.push(item);
     }
 
-    if (workerLock)
+    if (workerLock) {
       m_workerCond.notify_all();
+      createWorkers();
+    }
   }
 
 
@@ -320,7 +301,8 @@ namespace dxvk {
     for (auto& worker : m_workerThreads)
       worker.join();
     
-    m_writerThread.join();
+    if (m_writerThread.joinable())
+      m_writerThread.join();
   }
 
 
@@ -375,8 +357,10 @@ namespace dxvk {
       for (auto e = entries.first; e != entries.second; e++) {
         const auto& entry = m_entries[e->second];
 
-        auto rp = m_passManager->getRenderPass(entry.format);
-        pipeline->compilePipeline(entry.gpState, rp);
+        if (m_passManager->validateRenderPassFormat(entry.format)) {
+          auto rp = m_passManager->getRenderPass(entry.format);
+          pipeline->compilePipeline(entry.gpState, rp);
+        }
       }
     } else {
       auto pipeline = m_pipeManager->createComputePipeline(item.cp);
@@ -978,8 +962,8 @@ namespace dxvk {
         m_writerQueue.pop();
       }
 
-      if (!file) {
-        file = std::ofstream(getCacheFileName().c_str(),
+      if (!file.is_open()) {
+        file.open(getCacheFileName().c_str(),
           std::ios_base::binary |
           std::ios_base::app);
       }
@@ -988,11 +972,42 @@ namespace dxvk {
     }
   }
 
+
+  void DxvkStateCache::createWorkers() {
+    if (m_workerThreads.empty()) {
+      // Use half the available CPU cores for pipeline compilation
+      uint32_t numCpuCores = dxvk::thread::hardware_concurrency();
+      uint32_t numWorkers  = ((std::max(1u, numCpuCores) - 1) * 5) / 7;
+
+      if (numWorkers <  1) numWorkers =  1;
+      if (numWorkers > 32) numWorkers = 32;
+
+      if (m_device->config().numCompilerThreads > 0)
+        numWorkers = m_device->config().numCompilerThreads;
+
+      Logger::info(str::format("DXVK: Using ", numWorkers, " compiler threads"));
+
+      // Start the worker threads and the file writer
+      m_workerBusy.store(numWorkers);
+
+      for (uint32_t i = 0; i < numWorkers; i++) {
+        m_workerThreads.emplace_back([this] () { workerFunc(); });
+#ifndef DXVK_NATIVE
+        m_workerThreads[i].set_priority(ThreadPriority::Lowest);
+#endif
+      }
+    }
+  }
+
+
+  void DxvkStateCache::createWriter() {
+    if (!m_writerThread.joinable())
+      m_writerThread = dxvk::thread([this] () { writerFunc(); });
+  }
+
+
 #ifdef _WIN32
   std::wstring DxvkStateCache::getCacheFileName() const {
-#else
-  std::string DxvkStateCache::getCacheFileName() const {
-#endif
     std::string path = getCacheDir();
 
     if (!path.empty() && *path.rbegin() != '/')
@@ -1000,13 +1015,19 @@ namespace dxvk {
     
     std::string exeName = env::getExeBaseName();
     path += exeName + ".dxvk-cache";
-
-#ifdef _WIN32
     return str::tows(path.c_str());
-#else
-    return path;
-#endif
   }
+#else
+  std::string DxvkStateCache::getCacheFileName() const {
+    std::string path = getCacheDir();
+
+    if (!path.empty() && *path.rbegin() != '/')
+      path += '/';
+
+    path += env::getExeBaseName() + ".dxvk-cache";
+    return path;
+  }
+#endif
 
 
   std::string DxvkStateCache::getCacheDir() const {

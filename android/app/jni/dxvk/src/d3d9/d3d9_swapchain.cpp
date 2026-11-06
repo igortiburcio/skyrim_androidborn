@@ -283,11 +283,15 @@ namespace dxvk {
 
     m_window    = window;
 
-    m_dirty    |= vsync != m_vsync;
-    m_dirty    |= UpdatePresentRegion(pSourceRect, pDestRect);
+    bool vsyncChanged = vsync != m_vsync;
+    bool regionChanged = UpdatePresentRegion(pSourceRect, pDestRect);
+    bool hasSwap = m_presenter != nullptr && m_presenter->hasSwapChain();
+
+    m_dirty    |= vsyncChanged;
+    m_dirty    |= regionChanged;
     m_dirty    |= recreate;
-    m_dirty    |= m_presenter != nullptr &&
-                 !m_presenter->hasSwapChain();
+    m_dirty    |= m_presenter != nullptr && !hasSwap;
+
 
     m_vsync     = vsync;
 
@@ -484,7 +488,7 @@ namespace dxvk {
         cLevelExtent);
     });
     
-    dstTexInfo->SetWrittenByGPU(dst->GetSubresource(), true);
+    /* 1.10.3 tracks written resources internally. */
 
     return D3D_OK;
   }
@@ -628,8 +632,10 @@ namespace dxvk {
       if (changeFullscreen)
         this->LeaveFullscreenMode();
 
-      // Port: the platform layer owns the (fullscreen) window; a smaller back
-      // buffer is scaled up to it on present (resolution scale), not resized.
+      wsi::resizeWindow(
+        m_window, &m_windowState,
+        pPresentParams->BackBufferWidth,
+        pPresentParams->BackBufferHeight);
     }
     else {
       if (changeFullscreen) {
@@ -892,8 +898,6 @@ namespace dxvk {
     // Recreate swap chain if the previous present call failed
     VkResult status = m_device->waitForSubmission(&m_presentStatus);
 
-    // Port: Android reports SUBOPTIMAL for every present on a rotated display
-    // (the compositor applies the rotation); the swap chain is still usable.
     if (status != VK_SUCCESS && status != VK_SUBOPTIMAL_KHR)
       RecreateSwapChain(m_vsync);
   }
@@ -989,7 +993,7 @@ namespace dxvk {
       VkImage imageHandle = m_presenter->getImage(i).image;
       
       Rc<DxvkImage> image = new DxvkImage(
-        m_device->vkd(), imageInfo, imageHandle);
+        m_device.operator->(), imageInfo, imageHandle);
 
       m_imageViews[i] = new DxvkImageView(
         m_device->vkd(), image, viewInfo);
@@ -1030,7 +1034,7 @@ namespace dxvk {
     desc.IsAttachmentOnly   = FALSE;
 
     for (uint32_t i = 0; i < m_backBuffers.size(); i++)
-      m_backBuffers[i] = new D3D9Surface(m_parent, &desc, this);
+      m_backBuffers[i] = new D3D9Surface(m_parent, &desc, this, nullptr);
 
     auto swapImage = m_backBuffers[0]->GetCommonTexture()->GetImage();
 
@@ -1052,11 +1056,7 @@ namespace dxvk {
     m_context->beginRecording(
       m_device->createCommandList());
     
-    for (uint32_t i = 0; i < m_backBuffers.size(); i++) {
-      m_context->clearColorImage(
-        m_backBuffers[i]->GetCommonTexture()->GetImage(),
-        clearColor, subresources);
-    }
+    /* 1.10.3 removed clearColorImage. */
 
     m_device->submitCommandList(
       m_context->endRecording(),
@@ -1152,6 +1152,14 @@ namespace dxvk {
           BOOL                      Vsync,
           VkPresentModeKHR*         pDstModes) {
     uint32_t n = 0;
+
+    /* A frame cap paces frames in its own timer; waiting for vblank on top
+     * of it compounded the two waits (cap 30 with vsync rendered at 12 fps,
+     * the limiter spinning in half a core). Present without vblank sync
+     * when a cap is set - mailbox first, no tearing, which is what the
+     * official build runs with a frame cap. */
+    if (m_parent->GetOptions()->maxFrameRate > 0)
+      Vsync = FALSE;
 
     if (Vsync) {
       if (m_parent->GetOptions()->tearFree == Tristate::False)

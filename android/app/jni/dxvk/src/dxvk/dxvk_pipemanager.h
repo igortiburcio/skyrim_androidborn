@@ -6,6 +6,7 @@
 
 #include "dxvk_compute.h"
 #include "dxvk_graphics.h"
+#include "dxvk_pipecompiler.h"
 
 namespace dxvk {
 
@@ -38,7 +39,7 @@ namespace dxvk {
   public:
     
     DxvkPipelineManager(
-      const DxvkDevice*         device,
+            DxvkDevice*         device,
             DxvkRenderPassPool* passManager);
     
     ~DxvkPipelineManager();
@@ -85,6 +86,20 @@ namespace dxvk {
     DxvkPipelineCount getPipelineCount() const;
 
     /**
+     * \brief Queues a pipeline for async compilation
+     *
+     * Does nothing when async compilation is disabled.
+     */
+    void queueAsyncCompilation(
+            DxvkGraphicsPipeline*              pipeline,
+            DxvkGraphicsPipelineInstance*      instance,
+      const DxvkGraphicsPipelineStateInfo&     state,
+      const DxvkRenderPass*                    renderPass);
+
+    /** \brief Whether pipelines compile on worker threads */
+    bool isAsyncEnabled() const { return m_compiler != nullptr; }
+
+    /**
      * \brief Checks whether async compiler is busy
      * \returns \c true if shaders are being compiled
      */
@@ -97,9 +112,10 @@ namespace dxvk {
     
   private:
     
-    const DxvkDevice*         m_device;
+    DxvkDevice*               m_device;
     Rc<DxvkPipelineCache>     m_cache;
     Rc<DxvkStateCache>        m_stateCache;
+    Rc<DxvkPipelineCompiler>  m_compiler;
 
     std::atomic<uint32_t>     m_numComputePipelines  = { 0 };
     std::atomic<uint32_t>     m_numGraphicsPipelines = { 0 };

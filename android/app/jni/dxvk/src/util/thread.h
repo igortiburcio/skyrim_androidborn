@@ -4,9 +4,7 @@
 #include <condition_variable>
 #include <functional>
 #include <mutex>
-#ifndef _WIN32
 #include <thread>
-#endif
 
 #include "util_error.h"
 
@@ -153,7 +151,7 @@ namespace dxvk {
     }
 
     inline uint32_t get_id() {
-      return GetCurrentThreadId();
+      return uint32_t(GetCurrentThreadId());
     }
   }
 
@@ -332,7 +330,6 @@ namespace dxvk {
   };
 
 #else
-
   using mutex              = std::mutex;
   using thread             = std::thread;
   using recursive_mutex    = std::recursive_mutex;
@@ -345,7 +342,6 @@ namespace dxvk {
 
     uint32_t get_id();
   }
-
 #endif
 
 }

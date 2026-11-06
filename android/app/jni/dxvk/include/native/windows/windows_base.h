@@ -97,6 +97,32 @@ typedef HANDLE HWND;
 typedef HANDLE HKEY;
 typedef DWORD COLORREF;
 
+/* Window-message shims: dxvk 1.10.3's D3D9 swapchain keeps a window proc map
+ * even on native builds, but the fake Android window never receives Win32
+ * messages, so these are no-ops. */
+typedef intptr_t LONG_PTR;
+typedef LONG_PTR  LRESULT;
+typedef uintptr_t WPARAM;
+typedef intptr_t  LPARAM;
+#ifndef CALLBACK
+#define CALLBACK
+#endif
+#ifndef INVALID_HANDLE_VALUE
+#define INVALID_HANDLE_VALUE ((HANDLE)(intptr_t)-1)
+#endif
+#ifndef GWLP_WNDPROC
+#define GWLP_WNDPROC (-4)
+#endif
+typedef LRESULT (CALLBACK *WNDPROC)(HWND, UINT, WPARAM, LPARAM);
+static inline LRESULT SetWindowLongPtrA(HWND, int, LONG_PTR) { return 0; }
+static inline LRESULT SetWindowLongPtrW(HWND, int, LONG_PTR) { return 0; }
+static inline LONG_PTR GetWindowLongPtrA(HWND, int) { return 0; }
+static inline LONG_PTR GetWindowLongPtrW(HWND, int) { return 0; }
+static inline int IsWindowUnicode(HWND) { return 0; }
+static inline LRESULT CallWindowProcA(WNDPROC, HWND, UINT, WPARAM, LPARAM) { return 0; }
+static inline LRESULT CallWindowProcW(WNDPROC, HWND, UINT, WPARAM, LPARAM) { return 0; }
+static inline int CloseHandle(HANDLE) { return 1; }
+
 typedef char* LPSTR;
 typedef const char* LPCSTR;
 typedef const wchar_t* LPCWSTR;

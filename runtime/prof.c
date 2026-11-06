@@ -37,8 +37,10 @@ static void on_prof(int sig, siginfo_t *si, void *uc_) {
 void prof_start(void) {
     extern char g_save_dir[];
     char path[1100];
-    snprintf(path, sizeof path, "%s/noprof.txt", g_save_dir);
-    if (access(path, F_OK) == 0) return;
+    /* Opt-in: the SIGPROF sampler costs CPU on every thread and is only
+     * useful when diagnosing. */
+    snprintf(path, sizeof path, "%s/prof.txt", g_save_dir);
+    if (access(path, F_OK) != 0) return;
     g_samp = calloc(PROF_N, sizeof *g_samp);
     if (!g_samp) return;
     struct sigaction sa;
@@ -50,7 +52,7 @@ void prof_start(void) {
     struct itimerval it = {{0, 1000}, {0, 1000}};
     setitimer(ITIMER_PROF, &it, NULL);
     g_prof_on = 1;
-    LOG("profiler on (save/noprof.txt turns it off)");
+    LOG("profiler on (save/prof.txt)");
 }
 
 typedef struct { uintptr_t key; const char *name; uintptr_t base; uint32_t n; } Bin;

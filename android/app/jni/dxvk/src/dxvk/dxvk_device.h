@@ -6,6 +6,7 @@
 #include "dxvk_constant_state.h"
 #include "dxvk_context.h"
 #include "dxvk_extensions.h"
+#include "dxvk_fence.h"
 #include "dxvk_framebuffer.h"
 #include "dxvk_image.h"
 #include "dxvk_instance.h"
@@ -204,6 +205,12 @@ namespace dxvk {
     bool isUnifiedMemoryArchitecture() const;
 
     /**
+     * \brief Queries default framebuffer size
+     * \returns Default framebuffer size
+     */
+    DxvkFramebufferSize getDefaultFramebufferSize() const;
+
+    /**
      * \brief Queries supported shader stages
      * \returns Supported shader pipeline stages
      */
@@ -266,17 +273,24 @@ namespace dxvk {
             VkQueryType           type,
             VkQueryControlFlags   flags,
             uint32_t              index);
+
+    /**
+     * \brief Creates new fence
+     *
+     * \param [in] info Fence create info
+     * \returns The fence
+     */
+    Rc<DxvkFence> createFence(
+      const DxvkFenceCreateInfo& fenceInfo);
     
     /**
      * \brief Creates framebuffer for a set of render targets
      * 
-     * Automatically deduces framebuffer dimensions
-     * from the supplied render target views.
-     * \param [in] renderTargets Render targets
+     * \param [in] info Framebuffer info
      * \returns The framebuffer object
      */
     Rc<DxvkFramebuffer> createFramebuffer(
-      const DxvkRenderTargets& renderTargets);
+      const DxvkFramebufferInfo&  info);
     
     /**
      * \brief Creates a buffer object
@@ -341,23 +355,6 @@ namespace dxvk {
      */
     Rc<DxvkSampler> createSampler(
       const DxvkSamplerCreateInfo&  createInfo);
-    
-    /**
-     * \brief Creates a shader module
-     * 
-     * \param [in] stage Shader stage
-     * \param [in] slotCount Resource slot count
-     * \param [in] slotInfos Resource slot descriptions
-     * \param [in] iface Inter-stage interface slots
-     * \param [in] code Shader code
-     * \returns New shader module
-     */
-    Rc<DxvkShader> createShader(
-            VkShaderStageFlagBits     stage,
-            uint32_t                  slotCount,
-      const DxvkResourceSlot*         slotInfos,
-      const DxvkInterfaceSlots&       iface,
-      const SpirvCodeBuffer&          code);
     
     /**
      * \brief Retrieves stat counters
@@ -459,12 +456,31 @@ namespace dxvk {
     }
 
     /**
+     * \brief Increments a given stat counter
+     *
+     * \param [in] counter Stat counter to increment
+     * \param [in] value Increment value
+     */
+    void addStatCtr(DxvkStatCounter counter, uint64_t value) {
+      std::lock_guard<sync::Spinlock> lock(m_statLock);
+      m_statCounters.addCtr(counter, value);
+    }
+
+    /**
      * \brief Waits for a given submission
      * 
      * \param [in,out] status Submission status
      * \returns Result of the submission
      */
     VkResult waitForSubmission(DxvkSubmitStatus* status);
+
+    /**
+     * \brief Waits for resource to become idle
+     *
+     * \param [in] resource Resource to wait for
+     * \param [in] access Access mode to check
+     */
+    void waitForResource(const Rc<DxvkResource>& resource, DxvkAccess access);
     
     /**
      * \brief Waits until the device becomes idle

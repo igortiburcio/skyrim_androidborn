@@ -8,14 +8,12 @@ namespace dxvk {
     DxvkOptions() { }
     DxvkOptions(const Config& config);
 
+    /// Enable debug utils (alternative to DXVK_PERF_EVENTS=1)
+    bool enableDebugUtils;
+
     /// Enable state cache
     bool enableStateCache;
-
-    /// Enables OpenVR loading
-    bool enableOpenVR;
-
-    /// Enables OpenXR loading
-    bool enableOpenXR;
+    bool enableAsync;
 
     /// Number of compiler threads
     /// when using the state cache
@@ -24,11 +22,8 @@ namespace dxvk {
     /// Shader-related options
     Tristate useRawSsbo;
 
-    /// Workaround for NVIDIA driver
-    /// bug 3114283. Cut usable HVV
-    /// (Host-Visible Vidmem) heap
-    /// in half to avoid crash
-    Tristate halveNvidiaHVVHeap;
+    /// Workaround for NVIDIA driver bug 3114283
+    Tristate shrinkNvidiaHvvHeap;
 
     /// HUD elements
     std::string hud;

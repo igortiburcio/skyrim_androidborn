@@ -19,7 +19,7 @@ namespace dxvk {
    * recorded.
    */
   class DxvkContext : public RcObject {
-    
+    constexpr static VkDeviceSize StagingBufferSize = 4ull << 20;
   public:
     
     DxvkContext(const Rc<DxvkDevice>& device);
@@ -156,6 +156,7 @@ namespace dxvk {
     /**
      * \brief Binds vertex buffer
      * 
+     * When binding a null buffer, stride must be 0.
      * \param [in] binding Vertex buffer binding
      * \param [in] buffer New vertex buffer
      * \param [in] stride Stride between vertices
@@ -164,7 +165,7 @@ namespace dxvk {
             uint32_t              binding,
       const DxvkBufferSlice&      buffer,
             uint32_t              stride);
-    
+
     /**
      * \brief Binds transform feedback buffer
      * 
@@ -239,40 +240,6 @@ namespace dxvk {
             VkDeviceSize          offset,
             VkDeviceSize          length,
             VkClearColorValue     value);
-    
-    /**
-     * \brief Clears subresources of a color image
-     * 
-     * \param [in] image The image to clear
-     * \param [in] value Clear value
-     * \param [in] subresources Subresources to clear
-     */
-    void clearColorImage(
-      const Rc<DxvkImage>&            image,
-      const VkClearColorValue&        value,
-      const VkImageSubresourceRange&  subresources);
-    
-    /**
-     * \brief Clears subresources of a depth-stencil image
-     * 
-     * \param [in] image The image to clear
-     * \param [in] value Clear value
-     * \param [in] subresources Subresources to clear
-     */
-    void clearDepthStencilImage(
-      const Rc<DxvkImage>&            image,
-      const VkClearDepthStencilValue& value,
-      const VkImageSubresourceRange&  subresources);
-    
-    /**
-     * \brief Clears a compressed image to black
-     *
-     * \param [in] image The image to clear
-     * \param [in] subresources Subresources to clear
-     */
-    void clearCompressedColorImage(
-      const Rc<DxvkImage>&            image,
-      const VkImageSubresourceRange&  subresources);
     
     /**
      * \brief Clears an active render target
@@ -672,12 +639,23 @@ namespace dxvk {
     void generateMipmaps(
       const Rc<DxvkImageView>&        imageView,
             VkFilter                  filter);
-    
+
     /**
-     * \brief Initializes or invalidates an image
+     * \brief Initializes a buffer
+     *
+     * Clears the given buffer to zero. Only safe to call
+     * if the buffer is not currently in use by the GPU.
+     * \param [in] buffer Buffer to clear
+     */
+    void initBuffer(
+      const Rc<DxvkBuffer>&           buffer);
+
+    /**
+     * \brief Initializes an image
      * 
-     * Sets up the image layout for future operations
-     * while discarding any previous contents.
+     * Transitions the image into its default layout, and clears
+     * it to black unless the initial layout is preinitialized.
+     * Only safe to call if the image is not in use by the GPU.
      * \param [in] image The image to initialize
      * \param [in] subresources Image subresources
      * \param [in] initialLayout Initial image layout
@@ -781,27 +759,6 @@ namespace dxvk {
             VkDeviceSize              offset,
             VkDeviceSize              size,
       const void*                     data);
-    
-    /**
-     * \brief Updates an image
-     * 
-     * Copies data from the host into an image.
-     * \param [in] image Destination image
-     * \param [in] subsresources Image subresources to update
-     * \param [in] imageOffset Offset of the image area to update
-     * \param [in] imageExtent Size of the image area to update
-     * \param [in] data Source data
-     * \param [in] pitchPerRow Row pitch of the source data
-     * \param [in] pitchPerLayer Layer pitch of the source data
-     */
-    void updateImage(
-      const Rc<DxvkImage>&            image,
-      const VkImageSubresourceLayers& subresources,
-            VkOffset3D                imageOffset,
-            VkExtent3D                imageExtent,
-      const void*                     data,
-            VkDeviceSize              pitchPerRow,
-            VkDeviceSize              pitchPerLayer);
     
     /**
      * \brief Updates an depth-stencil image
@@ -1032,16 +989,27 @@ namespace dxvk {
     void signal(
       const Rc<sync::Signal>&   signal,
             uint64_t            value);
-    
+
     /**
-     * \brief Trims staging buffers
-     * 
-     * Releases staging buffer resources. Calling
-     * this may be useful if data updates on a
-     * given context are rare.
+     * \brief Waits for fence
+     *
+     * Stalls current command list execution until
+     * the fence reaches the given value or higher.
+     * \param [in] fence Fence to wait on
+     * \param [in] value Value to wait on
      */
-    void trimStagingBuffers();
-   
+    void waitFence(const Rc<DxvkFence>& fence, uint64_t value);
+
+    /**
+     * \brief Signals fence
+     *
+     * Signals fence to the given value once the current
+     * command list execution completes on the GPU.
+     * \param [in] fence Fence to signal
+     * \param [in] value Value to signal
+     */
+    void signalFence(const Rc<DxvkFence>& fence, uint64_t value);
+
     /**
      * \brief Begins a debug label region
      * \param [in] label The debug label
@@ -1067,6 +1035,20 @@ namespace dxvk {
      * tools to mark different workloads within a frame.
      */
     void insertDebugLabel(VkDebugUtilsLabelEXT *label);
+
+    /**
+     * \brief Increments a given stat counter
+     *
+     * The stat counters will be merged into the global
+     * stat counters upon execution of the command list.
+     * \param [in] counter Stat counter to increment
+     * \param [in] value Increment value
+     */
+    void addStatCtr(DxvkStatCounter counter, uint64_t value) {
+      if (m_cmd != nullptr)
+        m_cmd->addStatCtr(counter, value);
+    }
+
   private:
     
     Rc<DxvkDevice>          m_device;
@@ -1089,7 +1071,7 @@ namespace dxvk {
     DxvkBarrierControlFlags m_barrierControl;
     
     DxvkGpuQueryManager     m_queryManager;
-    DxvkStagingDataAlloc    m_staging;
+    DxvkStagingBuffer       m_staging;
     
     DxvkRenderTargetLayouts m_rtLayouts = { };
 
@@ -1107,6 +1089,7 @@ namespace dxvk {
     std::array<DxvkShaderResourceSlot, MaxNumResourceSlots>  m_rc;
     std::array<DxvkGraphicsPipeline*, 4096> m_gpLookupCache = { };
     std::array<DxvkComputePipeline*,   256> m_cpLookupCache = { };
+    std::array<Rc<DxvkFramebuffer>,    512> m_framebufferCache = { };
 
     void blitImageFb(
       const Rc<DxvkImage>&        dstImage,
@@ -1227,7 +1210,7 @@ namespace dxvk {
     void spillRenderPass(bool suspend);
     
     void renderPassBindFramebuffer(
-      const Rc<DxvkFramebuffer>&  framebuffer,
+      const DxvkFramebufferInfo&  framebufferInfo,
       const DxvkRenderPassOps&    ops,
             uint32_t              clearValueCount,
       const VkClearValue*         clearValues);
@@ -1261,6 +1244,9 @@ namespace dxvk {
             VkDescriptorSet         set,
       const DxvkPipelineLayout*     layout);
 
+    DxvkFramebufferInfo makeFramebufferInfo(
+      const DxvkRenderTargets&      renderTargets);
+
     void updateFramebuffer();
     
     void applyRenderTargetLoadLayouts();
@@ -1282,8 +1268,8 @@ namespace dxvk {
             VkImageLayout           oldLayout);
 
     void updateRenderTargetLayouts(
-      const Rc<DxvkFramebuffer>&    newFb,
-      const Rc<DxvkFramebuffer>&    oldFb);
+      const DxvkFramebufferInfo&    newFb,
+      const DxvkFramebufferInfo&    oldFb);
 
     void prepareImage(
             DxvkBarrierSet&         barriers,
@@ -1332,23 +1318,23 @@ namespace dxvk {
             VkPipelineStageFlags      dstStages,
             VkAccessFlags             dstAccess);
     
-    void initializeImage(
-      const Rc<DxvkImage>&            image,
-      const VkImageSubresourceRange&  subresources,
-            VkImageLayout             dstLayout,
-            VkPipelineStageFlags      dstStages,
-            VkAccessFlags             dstAccess);
-
     VkDescriptorSet allocateDescriptorSet(
             VkDescriptorSetLayout     layout);
 
     void trackDrawBuffer();
+
+    bool tryInvalidateDeviceLocalBuffer(
+      const Rc<DxvkBuffer>&           buffer,
+            VkDeviceSize              copySize);
 
     DxvkGraphicsPipeline* lookupGraphicsPipeline(
       const DxvkGraphicsPipelineShaders&  shaders);
 
     DxvkComputePipeline* lookupComputePipeline(
       const DxvkComputePipelineShaders&   shaders);
+    
+    Rc<DxvkFramebuffer> lookupFramebuffer(
+      const DxvkFramebufferInfo&      framebufferInfo);
 
     Rc<DxvkBuffer> createZeroBuffer(
             VkDeviceSize              size);

@@ -73,11 +73,31 @@ namespace dxvk {
   void DxvkSwapchainBlitter::setGammaRamp(
           uint32_t            cpCount,
     const DxvkGammaCp*        cpData) {
-    m_gammaRamp.resize(cpCount);
+    VkDeviceSize size = cpCount * sizeof(*cpData);
 
-    for (uint32_t i = 0; i < cpCount; i++)
-      m_gammaRamp[i] = cpData[i];
+    if (cpCount) {
+      if (m_gammaBuffer == nullptr || m_gammaBuffer->info().size < size) {
+        DxvkBufferCreateInfo bufInfo;
+        bufInfo.size = size;
+        bufInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        bufInfo.stages = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        bufInfo.access = VK_ACCESS_TRANSFER_READ_BIT;
 
+        m_gammaBuffer = m_device->createBuffer(bufInfo,
+          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+      }
+
+      if (!m_gammaSlice.handle)
+        m_gammaSlice = m_gammaBuffer->allocSlice();
+
+      std::memcpy(m_gammaSlice.mapPtr, cpData, size);
+    } else {
+      m_gammaBuffer = nullptr;
+      m_gammaSlice = DxvkBufferSliceHandle();
+    }
+
+    m_gammaCpCount = cpCount;
     m_gammaDirty = true;
   }
 
@@ -210,7 +230,7 @@ namespace dxvk {
 
 
   void DxvkSwapchainBlitter::updateGammaTexture(DxvkContext* ctx) {
-    uint32_t n = uint32_t(m_gammaRamp.size());
+    uint32_t n = m_gammaCpCount;
 
     if (n) {
       // Reuse existing image if possible
@@ -248,13 +268,14 @@ namespace dxvk {
         m_gammaView = m_device->createImageView(m_gammaImage, viewInfo);
       }
 
-      ctx->updateImage(m_gammaImage,
+      ctx->invalidateBuffer(m_gammaBuffer, m_gammaSlice);
+      ctx->copyBufferToImage(m_gammaImage,
         VkImageSubresourceLayers { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
         VkOffset3D { 0, 0, 0 },
         VkExtent3D { n, 1, 1 },
-        m_gammaRamp.data(),
-        sizeof(DxvkGammaCp) * n,
-        sizeof(DxvkGammaCp) * n);
+        m_gammaBuffer, 0, 0, 0);
+
+      m_gammaSlice = DxvkBufferSliceHandle();
     } else {
       m_gammaImage = nullptr;
       m_gammaView  = nullptr;
@@ -281,6 +302,7 @@ namespace dxvk {
     samplerInfo.compareOp       = VK_COMPARE_OP_ALWAYS;
     samplerInfo.borderColor     = VkClearColorValue();
     samplerInfo.usePixelCoord   = VK_TRUE;
+    samplerInfo.nonSeamless     = VK_FALSE;
     m_samplerPresent = m_device->createSampler(samplerInfo);
 
     samplerInfo.addressModeU    = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -291,43 +313,36 @@ namespace dxvk {
   }
 
   void DxvkSwapchainBlitter::createShaders() {
-    const SpirvCodeBuffer vsCode(dxvk_present_vert);
-    const SpirvCodeBuffer fsCodeBlit(dxvk_present_frag_blit);
-    const SpirvCodeBuffer fsCodeCopy(dxvk_present_frag);
-    const SpirvCodeBuffer fsCodeResolve(dxvk_present_frag_ms);
-    const SpirvCodeBuffer fsCodeResolveAmd(dxvk_present_frag_ms_amd);
+    SpirvCodeBuffer vsCode(dxvk_present_vert);
+    SpirvCodeBuffer fsCodeBlit(dxvk_present_frag_blit);
+    SpirvCodeBuffer fsCodeCopy(dxvk_present_frag);
+    SpirvCodeBuffer fsCodeResolve(dxvk_present_frag_ms);
+    SpirvCodeBuffer fsCodeResolveAmd(dxvk_present_frag_ms_amd);
     
     const std::array<DxvkResourceSlot, 2> fsResourceSlots = {{
       { BindingIds::Image, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_IMAGE_VIEW_TYPE_2D },
       { BindingIds::Gamma, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_IMAGE_VIEW_TYPE_1D },
     }};
 
-    m_vs = m_device->createShader(
-      VK_SHADER_STAGE_VERTEX_BIT,
-      0, nullptr, { 0u, 1u },
-      vsCode);
+    DxvkShaderCreateInfo vsInfo;
+    vsInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vsInfo.outputMask = 0x1;
+    m_vs = new DxvkShader(vsInfo, std::move(vsCode));
     
-    m_fsBlit = m_device->createShader(
-      VK_SHADER_STAGE_FRAGMENT_BIT,
-      fsResourceSlots.size(),
-      fsResourceSlots.data(),
-      { 1u, 1u, 0u, sizeof(PresenterArgs) },
-      fsCodeBlit);
+    DxvkShaderCreateInfo fsInfo;
+    fsInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fsInfo.resourceSlotCount = fsResourceSlots.size();
+    fsInfo.resourceSlots = fsResourceSlots.data();
+    fsInfo.pushConstSize = sizeof(PresenterArgs);
+    fsInfo.inputMask = 0x1;
+    fsInfo.outputMask = 0x1;
+    m_fsBlit = new DxvkShader(fsInfo, std::move(fsCodeBlit));
     
-    m_fsCopy = m_device->createShader(
-      VK_SHADER_STAGE_FRAGMENT_BIT,
-      fsResourceSlots.size(),
-      fsResourceSlots.data(),
-      { 0u, 1u, 0u, sizeof(PresenterArgs) },
-      fsCodeCopy);
-    
-    m_fsResolve = m_device->createShader(
-      VK_SHADER_STAGE_FRAGMENT_BIT,
-      fsResourceSlots.size(),
-      fsResourceSlots.data(),
-      { 0u, 1u, 0u, sizeof(PresenterArgs) },
-      m_device->extensions().amdShaderFragmentMask
-        ? fsCodeResolveAmd : fsCodeResolve);
+    fsInfo.inputMask = 0;
+    m_fsCopy = new DxvkShader(fsInfo, std::move(fsCodeCopy));
+    m_fsResolve = new DxvkShader(fsInfo, m_device->extensions().amdShaderFragmentMask
+      ? std::move(fsCodeResolveAmd)
+      : std::move(fsCodeResolve));
   }
 
   void DxvkSwapchainBlitter::createResolveImage(const DxvkImageCreateInfo& info) {

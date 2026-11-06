@@ -238,6 +238,8 @@ namespace dxvk {
                 || !required.extHostQueryReset.hostQueryReset)
         && (m_deviceFeatures.extMemoryPriority.memoryPriority
                 || !required.extMemoryPriority.memoryPriority)
+        && (m_deviceFeatures.extNonSeamlessCubeMap.nonSeamlessCubeMap
+                || !required.extNonSeamlessCubeMap.nonSeamlessCubeMap)
         && (m_deviceFeatures.extRobustness2.robustBufferAccess2
                 || !required.extRobustness2.robustBufferAccess2)
         && (m_deviceFeatures.extRobustness2.robustImageAccess2
@@ -249,7 +251,9 @@ namespace dxvk {
         && (m_deviceFeatures.extVertexAttributeDivisor.vertexAttributeInstanceRateDivisor
                 || !required.extVertexAttributeDivisor.vertexAttributeInstanceRateDivisor)
         && (m_deviceFeatures.extVertexAttributeDivisor.vertexAttributeInstanceRateZeroDivisor
-                || !required.extVertexAttributeDivisor.vertexAttributeInstanceRateZeroDivisor);
+                || !required.extVertexAttributeDivisor.vertexAttributeInstanceRateZeroDivisor)
+        && (m_deviceFeatures.khrTimelineSemaphore.timelineSemaphore
+                || !required.khrTimelineSemaphore.timelineSemaphore);
   }
   
   
@@ -263,7 +267,7 @@ namespace dxvk {
           DxvkDeviceFeatures  enabledFeatures) {
     DxvkDeviceExtensions devExtensions;
 
-    std::array<DxvkExt*, 28> devExtensionList = {{
+    std::vector<DxvkExt*> devExtensionList = {
       &devExtensions.amdMemoryOverallocationBehaviour,
       &devExtensions.amdShaderFragmentMask,
       &devExtensions.ext4444Formats,
@@ -275,6 +279,7 @@ namespace dxvk {
       &devExtensions.extHostQueryReset,
       &devExtensions.extMemoryBudget,
       &devExtensions.extMemoryPriority,
+      &devExtensions.extNonSeamlessCubeMap,
       &devExtensions.extRobustness2,
       &devExtensions.extShaderDemoteToHelperInvocation,
       &devExtensions.extShaderStencilExport,
@@ -286,13 +291,18 @@ namespace dxvk {
       &devExtensions.khrDepthStencilResolve,
       &devExtensions.khrDrawIndirectCount,
       &devExtensions.khrDriverProperties,
+#ifdef _WIN32
+      &devExtensions.khrExternalMemoryWin32,
+      &devExtensions.khrExternalSemaphoreWin32,
+#endif
       &devExtensions.khrImageFormatList,
       &devExtensions.khrSamplerMirrorClampToEdge,
       &devExtensions.khrShaderFloatControls,
       &devExtensions.khrSwapchain,
+      &devExtensions.khrTimelineSemaphore,
       &devExtensions.nvxBinaryImport,
       &devExtensions.nvxImageViewHandle,
-    }};
+    };
 
     // Only enable Cuda interop extensions in 64-bit builds in
     // order to avoid potential driver or address space issues.
@@ -376,6 +386,11 @@ namespace dxvk {
       enabledFeatures.extMemoryPriority.pNext = std::exchange(enabledFeatures.core.pNext, &enabledFeatures.extMemoryPriority);
     }
 
+    if (devExtensions.extNonSeamlessCubeMap) {
+      enabledFeatures.extNonSeamlessCubeMap.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_NON_SEAMLESS_CUBE_MAP_FEATURES_EXT;
+      enabledFeatures.extNonSeamlessCubeMap.pNext = std::exchange(enabledFeatures.core.pNext, &enabledFeatures.extNonSeamlessCubeMap);
+    }
+
     if (devExtensions.extShaderDemoteToHelperInvocation) {
       enabledFeatures.extShaderDemoteToHelperInvocation.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES_EXT;
       enabledFeatures.extShaderDemoteToHelperInvocation.pNext = std::exchange(enabledFeatures.core.pNext, &enabledFeatures.extShaderDemoteToHelperInvocation);
@@ -399,6 +414,11 @@ namespace dxvk {
     if (devExtensions.khrBufferDeviceAddress) {
       enabledFeatures.khrBufferDeviceAddress.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_KHR;
       enabledFeatures.khrBufferDeviceAddress.pNext = std::exchange(enabledFeatures.core.pNext, &enabledFeatures.khrBufferDeviceAddress);
+    }
+
+    if (devExtensions.khrTimelineSemaphore) {
+      enabledFeatures.khrTimelineSemaphore.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES_KHR;
+      enabledFeatures.khrTimelineSemaphore.pNext = std::exchange(enabledFeatures.core.pNext, &enabledFeatures.khrTimelineSemaphore);
     }
 
     // Report the desired overallocation behaviour to the driver
@@ -620,15 +640,30 @@ namespace dxvk {
       m_deviceInfo.khrShaderFloatControls.pNext = std::exchange(m_deviceInfo.core.pNext, &m_deviceInfo.khrShaderFloatControls);
     }
 
+    if (m_deviceExtensions.supports(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)) {
+      m_deviceInfo.khrTimelineSemaphore.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_PROPERTIES_KHR;
+      m_deviceInfo.khrTimelineSemaphore.pNext = std::exchange(m_deviceInfo.core.pNext, &m_deviceInfo.khrTimelineSemaphore);
+    }
+
     // Query full device properties for all enabled extensions
     m_vki->vkGetPhysicalDeviceProperties2(m_handle, &m_deviceInfo.core);
     
-    // Nvidia reports the driver version in a slightly different format
-    if (DxvkGpuVendor(m_deviceInfo.core.properties.vendorID) == DxvkGpuVendor::Nvidia) {
-      m_deviceInfo.core.properties.driverVersion = VK_MAKE_VERSION(
-        VK_VERSION_MAJOR(m_deviceInfo.core.properties.driverVersion),
-        VK_VERSION_MINOR(m_deviceInfo.core.properties.driverVersion >> 0) >> 2,
-        VK_VERSION_PATCH(m_deviceInfo.core.properties.driverVersion >> 2) >> 4);
+    // Some drivers reports the driver version in a slightly different format
+    switch (m_deviceInfo.khrDeviceDriverProperties.driverID) {
+      case VK_DRIVER_ID_NVIDIA_PROPRIETARY:
+        m_deviceInfo.core.properties.driverVersion = VK_MAKE_VERSION(
+          (m_deviceInfo.core.properties.driverVersion >> 22) & 0x3ff,
+          (m_deviceInfo.core.properties.driverVersion >> 14) & 0x0ff,
+          (m_deviceInfo.core.properties.driverVersion >>  6) & 0x0ff);
+        break;
+
+      case VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS:
+        m_deviceInfo.core.properties.driverVersion = VK_MAKE_VERSION(
+          m_deviceInfo.core.properties.driverVersion >> 14,
+          m_deviceInfo.core.properties.driverVersion & 0x3fff, 0);
+        break;
+
+      default:;
     }
   }
 
@@ -671,6 +706,11 @@ namespace dxvk {
       m_deviceFeatures.extMemoryPriority.pNext = std::exchange(m_deviceFeatures.core.pNext, &m_deviceFeatures.extMemoryPriority);
     }
 
+    if (m_deviceExtensions.supports(VK_EXT_NON_SEAMLESS_CUBE_MAP_EXTENSION_NAME)) {
+      m_deviceFeatures.extNonSeamlessCubeMap.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_NON_SEAMLESS_CUBE_MAP_FEATURES_EXT;
+      m_deviceFeatures.extNonSeamlessCubeMap.pNext = std::exchange(m_deviceFeatures.core.pNext, &m_deviceFeatures.extNonSeamlessCubeMap);
+    }
+
     if (m_deviceExtensions.supports(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME)) {
       m_deviceFeatures.extRobustness2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT;
       m_deviceFeatures.extRobustness2.pNext = std::exchange(m_deviceFeatures.core.pNext, &m_deviceFeatures.extRobustness2);
@@ -694,6 +734,11 @@ namespace dxvk {
     if (m_deviceExtensions.supports(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) {
       m_deviceFeatures.khrBufferDeviceAddress.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_KHR;
       m_deviceFeatures.khrBufferDeviceAddress.pNext = std::exchange(m_deviceFeatures.core.pNext, &m_deviceFeatures.khrBufferDeviceAddress);
+    }
+
+    if (m_deviceExtensions.supports(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)) {
+      m_deviceFeatures.khrTimelineSemaphore.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES_KHR;
+      m_deviceFeatures.khrTimelineSemaphore.pNext = std::exchange(m_deviceFeatures.core.pNext, &m_deviceFeatures.khrTimelineSemaphore);
     }
 
     m_vki->vkGetPhysicalDeviceFeatures2(m_handle, &m_deviceFeatures.core);
@@ -776,6 +821,8 @@ namespace dxvk {
       "\n  hostQueryReset                         : ", features.extHostQueryReset.hostQueryReset ? "1" : "0",
       "\n", VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME,
       "\n  memoryPriority                         : ", features.extMemoryPriority.memoryPriority ? "1" : "0",
+      "\n", VK_EXT_NON_SEAMLESS_CUBE_MAP_EXTENSION_NAME,
+      "\n  nonSeamlessCubeMap                     : ", features.extNonSeamlessCubeMap.nonSeamlessCubeMap ? "1" : "0",
       "\n", VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
       "\n  robustBufferAccess2                    : ", features.extRobustness2.robustBufferAccess2 ? "1" : "0",
       "\n  robustImageAccess2                     : ", features.extRobustness2.robustImageAccess2 ? "1" : "0",
@@ -789,7 +836,9 @@ namespace dxvk {
       "\n  vertexAttributeInstanceRateDivisor     : ", features.extVertexAttributeDivisor.vertexAttributeInstanceRateDivisor ? "1" : "0",
       "\n  vertexAttributeInstanceRateZeroDivisor : ", features.extVertexAttributeDivisor.vertexAttributeInstanceRateZeroDivisor ? "1" : "0",
       "\n", VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-      "\n  bufferDeviceAddress                    : ", features.khrBufferDeviceAddress.bufferDeviceAddress));
+      "\n  bufferDeviceAddress                    : ", features.khrBufferDeviceAddress.bufferDeviceAddress,
+      "\n", VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME,
+      "\n  timelineSemaphore                      : ", features.khrTimelineSemaphore.timelineSemaphore));
   }
 
 

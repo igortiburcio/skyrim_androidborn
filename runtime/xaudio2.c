@@ -9,8 +9,13 @@
  * mix (locked, buffer events recorded), then the recorded events (unlocked). */
 #include "hcom.h"
 #include <SDL2/SDL.h>
+#include <libavcodec/avcodec.h>
+#include <libavutil/channel_layout.h>
+#include <libavutil/frame.h>
+#include <libavutil/mem.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdio.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -21,15 +26,22 @@
 #define MAX_SENDS 8
 
 enum { V_SOURCE, V_SUBMIX, V_MASTER };
-enum { FMT_PCM16, FMT_PCM8, FMT_F32, FMT_PCM24, FMT_PCM32, FMT_ADPCM, FMT_NONE };
+enum { FMT_PCM16, FMT_PCM8, FMT_F32, FMT_PCM24, FMT_PCM32, FMT_ADPCM, FMT_WMA, FMT_NONE };
 
 typedef struct {
     uint32_t flags, bytes, data, play_begin, play_len, loop_begin, loop_len, loop_count, ctx;
-    int16_t *decoded;   /* ADPCM, decoded at submit */
-    uint32_t nframes;   /* frames in the whole buffer */
+    int16_t *decoded;   /* ADPCM/xWMA decoded at submit */
+    uint32_t nframes;   /* frames in the whole buffer (PCM/ADPCM/xWMA) */
     uint32_t pos, end;  /* current frame, end of the play region */
     int loops_left;     /* 255 = forever */
     int started;
+    /* xWMA is decoded in full by a worker thread outside g_lock: the mixer
+     * only copies frames, so it can never run out mid-stream. */
+    uint32_t wma_off;   /* next compressed byte (decode cursor) */
+    uint32_t pcm_n, pcm_rd, pcm_cap;  /* decoded frames, read cursor, capacity */
+    int wma_done;       /* decode finished: pcm_n frames are valid */
+    int decoding;       /* 1: worker is decoding this buffer, 2: cancelled */
+    uint32_t id;        /* log id */
 } XBuf;
 
 typedef struct Voice Voice;
@@ -41,6 +53,7 @@ struct Voice {
     int fmt, bpf, block_align, spb;
     uint8_t adpcm_coef[64];
     int ncoef;
+    AVCodecContext *wma;   /* xWMA (WMAudio2) decoder */
     float ratio, max_ratio;
     int running;
     XBuf q[MAX_QUEUE];
@@ -66,6 +79,83 @@ static uint32_t g_engine_cb[16];
 static int g_nengine_cb;
 static int g_rate = 48000, g_running, g_thread_started;
 static SDL_AudioDeviceID g_dev;
+static uint32_t g_dev_buf_bytes;   /* one OpenSL buffer, in device-format bytes */
+static uint32_t g_dev_bytes_per_ms = 384;  /* 48 kHz stereo F32 default */
+
+/* ------------------------------------------------------ audio diagnostics
+ * Enabled by an empty save/audiodump.txt. Writes raw int16 PCM files next to
+ * it and logs mixer health, so decode, mix and device problems can be told
+ * apart from the PC. The files are only written while the marker exists. */
+static uint64_t now_us(void);
+static int g_audiodump = -1;
+static FILE *g_mix_dump;
+static unsigned long long g_mix_dump_left;
+static unsigned long long g_silence_frames, g_dry_passes;
+static unsigned long long g_pass_window_max_us;
+static uint32_t g_qmin = ~0u, g_qmax;
+static uint64_t g_stat_next_us, g_mix_start_us, g_q_ignore_until;
+
+static int audiodump_enabled(void) {
+    if (g_audiodump < 0) {
+        extern char g_save_dir[];
+        char path[1100];
+        snprintf(path, sizeof path, "%s/audiodump.txt", g_save_dir);
+        g_audiodump = access(path, F_OK) == 0;
+        if (g_audiodump) LOG("xaudio2: audio dump on (%s)", path);
+    }
+    return g_audiodump;
+}
+
+static void audiodump_begin(void) {
+    if (!audiodump_enabled() || g_mix_dump) return;
+    extern char g_save_dir[];
+    char path[1100];
+    snprintf(path, sizeof path, "%s/mix_dump.raw", g_save_dir);
+    FILE *f = fopen(path, "wb");
+    if (!f) return;
+    g_mix_dump = f;
+    g_mix_dump_left = (unsigned long long)g_rate * 40;  /* 40 s, stereo */
+    LOG("xaudio2: dumping mixed audio to %s", path);
+}
+
+static void audiodump_mix(const float *out, int frames) {
+    if (!g_mix_dump || !g_mix_dump_left) return;
+    int16_t buf[512 * 2];
+    int done = 0;
+    while (done < frames && g_mix_dump_left) {
+        int n = frames - done;
+        if (n > 512) n = 512;
+        if ((unsigned long long)n > g_mix_dump_left) n = (int)g_mix_dump_left;
+        for (int i = 0; i < n * 2; i++) {
+            float s = out[(size_t)done * 2 + i];
+            if (s < -1.0f) s = -1.0f;
+            else if (s > 1.0f) s = 1.0f;
+            buf[i] = (int16_t)(s * 32767.0f);
+        }
+        fwrite(buf, sizeof(int16_t), (size_t)n * 2, g_mix_dump);
+        g_mix_dump_left -= (unsigned)n;
+        done += n;
+    }
+    if (!g_mix_dump_left) {
+        fclose(g_mix_dump);
+        g_mix_dump = NULL;
+        LOG("xaudio2: mixed audio dump complete");
+    }
+}
+
+static void audiodump_wma(uint32_t id, const int16_t *pcm, uint32_t frames, int ch, int rate) {
+    if (!audiodump_enabled() || id > 2 || !pcm || !frames) return;
+    extern char g_save_dir[];
+    char path[1100];
+    snprintf(path, sizeof path, "%s/wma_%u_%dch_%d.raw", g_save_dir, id, ch, rate);
+    FILE *f = fopen(path, "wb");
+    if (!f) return;
+    uint64_t cap = (uint64_t)(rate > 0 ? rate : 48000) * 30;
+    if (frames > cap) frames = (uint32_t)cap;
+    fwrite(pcm, sizeof(int16_t), (size_t)frames * (size_t)ch, f);
+    fclose(f);
+    LOG("xaudio2: dumped xWMA buffer %u (%u frames) to %s", id, frames, path);
+}
 
 static const uint8_t CLSID_XAudio2[16] = {0x85, 0x86, 0x50, 0x5a, 0x54, 0xa2, 0xba, 0x4f, 0x9b, 0x82, 0x9a, 0x24, 0xb0, 0x03, 0x06, 0xaf};
 /* XAudio2 2.6 (Skyrim): same interfaces as 2.7, different class ids */
@@ -106,6 +196,51 @@ static void adpcm_block(Voice *v, const uint8_t *b, int16_t *out) {
     }
 }
 
+/* xWMA (WAVEFORMATEX tag 0x0161): the game submits WMAv2 bitstream buffers.
+ * FFmpeg's wmav2 decoder reads the codec flags from extradata bytes 4-5, so
+ * the WAVEFORMATEX cbSize extra data goes in as extradata; block_align is
+ * mandatory. */
+static void init_wma(Voice *v, uint32_t wf) {
+    const AVCodec *codec = avcodec_find_decoder(AV_CODEC_ID_WMAV2);
+    if (!codec) {
+        LOG("xaudio2: no WMAv2 decoder in this build");
+        return;
+    }
+    AVCodecContext *ctx = avcodec_alloc_context3(codec);
+    if (!ctx) return;
+    ctx->sample_rate = v->rate;
+    av_channel_layout_default(&ctx->ch_layout, v->in_ch);
+    ctx->block_align = v->block_align;
+    ctx->bit_rate = (int64_t)M32(wf + 8) * 8;
+    /* Skyrim's WAVEFORMATEX has cbSize=0, so the WMA flags2 byte is missing.
+     * A 6-byte extradata with 0x1f is used; 0x1f is the flags2 value the
+     * xWMA streams need. */
+    int cb = M16(wf + 16);
+    if (cb >= 6) {
+        ctx->extradata = av_mallocz((size_t)cb + AV_INPUT_BUFFER_PADDING_SIZE);
+        if (ctx->extradata) {
+            memcpy(ctx->extradata, MEM + wf + 18, (size_t)cb);
+            ctx->extradata_size = cb;
+        }
+    } else {
+        ctx->extradata = av_mallocz(6 + AV_INPUT_BUFFER_PADDING_SIZE);
+        if (ctx->extradata) {
+            ctx->extradata[4] = 0x1f;   /* flags2: exp vlc + bit reservoir + variable block */
+            ctx->extradata_size = 6;
+        }
+    }
+    ctx->request_sample_fmt = AV_SAMPLE_FMT_FLT;
+    if (avcodec_open2(ctx, codec, NULL) < 0) {
+        LOG("xaudio2: WMAv2 open failed (ch %d, %d Hz, block %d, cb %d)",
+            v->in_ch, v->rate, v->block_align, cb);
+        avcodec_free_context(&ctx);
+        return;
+    }
+    v->wma = ctx;
+    LOG("xaudio2: xWMA decoder ready (%d ch, %d Hz, block %d, cb %d)",
+        v->in_ch, v->rate, v->block_align, cb);
+}
+
 static void set_format(Voice *v, uint32_t wf) {
     uint16_t tag = M16(wf);
     int bits = M16(wf + 14);
@@ -127,13 +262,237 @@ static void set_format(Voice *v, uint32_t wf) {
         if (v->ncoef > 16) v->ncoef = 16;
         memcpy(v->adpcm_coef, MEM + wf + 22, (size_t)v->ncoef * 4);
     }
-    if (v->fmt == FMT_NONE) LOG("xaudio2: unsupported source format tag %04x (%d ch, %d Hz) plays silent", tag, v->in_ch, v->rate);
+    else if (tag == 0x0161) {
+        v->fmt = FMT_WMA;
+        init_wma(v, wf);
+    }
+    if (v->fmt == FMT_NONE) {
+        static unsigned s_silent;
+        if (++s_silent % 100 == 1)
+            LOG("xaudio2: unsupported source format tag %04x (%d ch, %d Hz) plays silent (%u so far)", tag, v->in_ch, v->rate, s_silent);
+    }
     v->bpf = v->fmt == FMT_ADPCM ? 2 * v->in_ch : v->block_align ? v->block_align : v->in_ch * bits / 8;
 }
 
-static void read_frame(Voice *v, XBuf *b, uint32_t f, float *out) {
+/* Appends every frame FFmpeg currently has for ctx to a growable int16 PCM
+ * buffer (interleaved, starting at element n). Returns frames appended. */
+static uint32_t wma_receive_into(AVCodecContext *ctx, int in_ch,
+                                 int16_t **pcm, uint32_t *n, uint32_t *cap) {
+    AVFrame *frame = av_frame_alloc();
+    if (!frame) return 0;
+    uint32_t got = 0;
+    int ret;
+    while ((ret = avcodec_receive_frame(ctx, frame)) == 0) {
+        int ch = frame->ch_layout.nb_channels;
+        int nf = frame->nb_samples;
+        if (ch < 1) ch = 1;
+        if (*n + got + (uint32_t)nf > *cap) {
+            uint32_t grow = (*n + got + (uint32_t)nf) * 2 + 4096;
+            int16_t *p = realloc(*pcm, sizeof(int16_t) * (size_t)grow * (size_t)in_ch);
+            if (!p) { av_frame_unref(frame); break; }
+            *pcm = p;
+            *cap = grow;
+        }
+        for (int i = 0; i < nf; i++) {
+            for (int c = 0; c < in_ch; c++) {
+                int sc = c < ch ? c : ch - 1;
+                float s = 0.0f;
+                switch (frame->format) {
+                case AV_SAMPLE_FMT_FLTP: s = ((const float *)frame->data[sc])[i]; break;
+                case AV_SAMPLE_FMT_S16P: s = ((const int16_t *)frame->data[sc])[i] / 32768.0f; break;
+                case AV_SAMPLE_FMT_FLT:  s = ((const float *)frame->data[0])[i * ch + sc]; break;
+                case AV_SAMPLE_FMT_S16:  s = ((const int16_t *)frame->data[0])[i * ch + sc] / 32768.0f; break;
+                default: break;
+                }
+                if (s < -1.0f) s = -1.0f;
+                else if (s > 1.0f) s = 1.0f;
+                (*pcm)[((size_t)*n + (size_t)got + (size_t)i) * (size_t)in_ch + (size_t)c] = (int16_t)(s * 32767.0f);
+            }
+        }
+        got += (uint32_t)nf;
+        av_frame_unref(frame);
+    }
+    av_frame_free(&frame);
+    return got;
+}
+
+/* One buffer handed to the decode thread. Everything the decoder needs is
+ * copied here under g_lock; the worker never dereferences the voice or the
+ * guest queue, so a flush or voice destruction racing with a decode can only
+ * make the result get dropped, never crash. */
+typedef struct {
+    Voice   *voice;        /* identity only, never dereferenced */
+    uint32_t id;
+    uint32_t bytes, data;
+    int      in_ch, rate, block_align;
+    int64_t  bit_rate;
+    uint8_t  extradata[64];
+    int      extradata_size;
+} WmaJob;
+
+/* Decodes a whole submitted xWMA buffer. Runs on the decode thread, outside
+ * g_lock: neither the game thread nor the mixer ever waits for this. */
+static int16_t *wma_decode_job(const WmaJob *job, uint32_t *frames_out) {
+    const AVCodec *codec = avcodec_find_decoder(AV_CODEC_ID_WMAV2);
+    if (!codec) return NULL;
+    AVCodecContext *ctx = avcodec_alloc_context3(codec);
+    if (!ctx) return NULL;
+    ctx->sample_rate = job->rate;
+    av_channel_layout_default(&ctx->ch_layout, job->in_ch);
+    ctx->block_align = job->block_align;
+    ctx->bit_rate = job->bit_rate;
+    if (job->extradata_size > 0) {
+        ctx->extradata = av_mallocz((size_t)job->extradata_size + AV_INPUT_BUFFER_PADDING_SIZE);
+        if (ctx->extradata) {
+            memcpy(ctx->extradata, job->extradata, (size_t)job->extradata_size);
+            ctx->extradata_size = job->extradata_size;
+        }
+    }
+    ctx->request_sample_fmt = AV_SAMPLE_FMT_FLT;
+    if (avcodec_open2(ctx, codec, NULL) < 0) {
+        avcodec_free_context(&ctx);
+        return NULL;
+    }
+
+    int16_t *pcm = NULL;
+    uint32_t n = 0, cap = 0, off = 0;
+    /* xWMA is VBR, but nAvgBytesPerSec gets close; reserving once avoids
+     * realloc doubling a whole music track to ~2x its final size. */
+    if (job->bit_rate > 0 && job->rate > 0 && job->bytes) {
+        uint64_t est = (uint64_t)job->bytes * (uint64_t)job->rate
+                     / (uint64_t)(job->bit_rate / 8) + 4096;
+        if (est < 0x7FFFFFFFu) {
+            pcm = malloc(sizeof(int16_t) * (size_t)est * (size_t)job->in_ch);
+            if (pcm) cap = (uint32_t)est;
+        }
+    }
+
+    uint32_t rejected = 0;
+    while (off < job->bytes) {
+        uint32_t left = job->bytes - off;
+        uint32_t len = job->block_align > 0 ? (uint32_t)job->block_align : left;
+        if (len > left) len = left;
+        uint8_t *buf = av_malloc((size_t)len + AV_INPUT_BUFFER_PADDING_SIZE);
+        if (!buf) break;
+        memcpy(buf, MEM + job->data + off, len);
+        memset(buf + len, 0, AV_INPUT_BUFFER_PADDING_SIZE);
+        off += len;
+        AVPacket *pkt = av_packet_alloc();
+        if (!pkt) { av_free(buf); break; }
+        pkt->data = buf;
+        pkt->size = (int)len;
+        int ret = avcodec_send_packet(ctx, pkt);
+        av_free(buf);
+        av_packet_free(&pkt);
+        if (ret < 0) { rejected++; continue; }
+        uint32_t got = wma_receive_into(ctx, job->in_ch, &pcm, &n, &cap);
+        n += got;
+    }
+    if (rejected && job->id <= 3)
+        LOG("xaudio2: WMA packets rejected: %u (%u bytes)", rejected, job->bytes);
+    /* Drain the decoder delay so the tail of the stream is not lost. */
+    avcodec_send_packet(ctx, NULL);
+    uint32_t tail = wma_receive_into(ctx, job->in_ch, &pcm, &n, &cap);
+    n += tail;
+    avcodec_free_context(&ctx);
+    *frames_out = n;
+    return pcm;
+}
+
+/* One worker per class, jobs in submission order. Two workers keep short
+ * sound effects from queueing behind a whole music track: the game submits
+ * hundreds of small buffers (footsteps, voices) alongside multi-minute
+ * tracks, and a single decode of a track can take ~1s. */
+#define WMA_SMALL_BYTES (128u * 1024u)
+
+static void *wma_decode_main(void *arg) {
+    int big = (int)(long)arg;
+    for (;;) {
+        usleep(10000);
+        WmaJob job;
+        int found = 0;
+        pthread_mutex_lock(&g_lock);
+        for (int i = 0; i < MAX_VOICES && !found; i++) {
+            Voice *v = g_voices[i];
+            if (!v || v->dead || v->fmt != FMT_WMA || !v->wma || !v->qn) continue;
+            for (int k = 0; k < v->qn; k++) {
+                XBuf *b = &v->q[(v->qhead + k) % MAX_QUEUE];
+                if (b->wma_done || b->decoding) continue;
+                if (big ? (b->bytes <= WMA_SMALL_BYTES) : (b->bytes > WMA_SMALL_BYTES)) continue;
+                memset(&job, 0, sizeof job);
+                job.voice = v;
+                job.id = b->id;
+                job.bytes = b->bytes;
+                job.data = b->data;
+                job.in_ch = v->in_ch;
+                job.rate = v->rate;
+                job.block_align = v->block_align;
+                job.bit_rate = v->wma->bit_rate;
+                int es = v->wma->extradata_size;
+                if (v->wma->extradata && es > 0) {
+                    if (es > (int)sizeof job.extradata) es = (int)sizeof job.extradata;
+                    memcpy(job.extradata, v->wma->extradata, (size_t)es);
+                    job.extradata_size = es;
+                }
+                b->decoding = 1;
+                found = 1;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&g_lock);
+        if (!found) continue;
+
+        uint32_t nframes = 0;
+        uint64_t t_dec = now_us();
+        int16_t *pcm = wma_decode_job(&job, &nframes);
+        t_dec = now_us() - t_dec;
+        audiodump_wma(job.id, pcm, nframes, job.in_ch, job.rate);
+        if (job.bytes > WMA_SMALL_BYTES || t_dec > 50000)
+            LOG("xaudio2: xWMA buffer %u decoded %u frames in %ums",
+                job.id, nframes, (unsigned)(t_dec / 1000));
+
+        pthread_mutex_lock(&g_lock);
+        Voice *v = NULL;
+        for (int i = 0; i < MAX_VOICES; i++)
+            if (g_voices[i] == job.voice) { v = g_voices[i]; break; }
+        XBuf *b = NULL;
+        if (v && !v->dead)
+            for (int k = 0; k < v->qn; k++) {
+                XBuf *cand = &v->q[(v->qhead + k) % MAX_QUEUE];
+                if (cand->id == job.id) { b = cand; break; }
+            }
+        if (b && b->decoding == 1 && !b->wma_done) {
+            free(b->decoded);
+            b->decoded = pcm;
+            b->pcm_n = b->pcm_cap = nframes;
+            b->pcm_rd = 0;
+            b->nframes = nframes;
+            b->pos = 0;
+            b->end = nframes;
+            b->wma_done = 1;
+            if (b->id <= 3)
+                LOG("xaudio2: xWMA buffer %u: %u bytes -> %u frames (%d ch, %d Hz)",
+                    b->id, b->bytes, nframes, v->in_ch, v->rate);
+            pcm = NULL;
+        }
+        if (b && b->decoding == 1) b->decoding = 0;
+        pthread_mutex_unlock(&g_lock);
+        free(pcm);
+    }
+    return NULL;
+}
+
+static int read_frame(Voice *v, XBuf *b, uint32_t f, float *out) {
     int ch = v->in_ch;
-    if (b->decoded) { for (int c = 0; c < ch; c++) out[c] = b->decoded[f * ch + c] / 32768.0f; return; }
+    if (v->fmt == FMT_WMA) {
+        /* Fully decoded by the worker: pure consumption, never pad silence
+         * (a gap in the middle of a stream is an audible click). */
+        if (b->pcm_rd >= b->pcm_n) return 0;
+        for (int c = 0; c < ch; c++) out[c] = b->decoded[b->pcm_rd * ch + c] / 32768.0f;
+        b->pcm_rd++;
+        return 1;
+    }
+    if (b->decoded) { for (int c = 0; c < ch; c++) out[c] = b->decoded[f * ch + c] / 32768.0f; return 1; }
     uint32_t a = b->data + f * (uint32_t)v->bpf;
     switch (v->fmt) {
     case FMT_PCM16: for (int c = 0; c < ch; c++) out[c] = (int16_t)M16(a + 2 * c) / 32768.0f; break;
@@ -148,6 +507,7 @@ static void read_frame(Voice *v, XBuf *b, uint32_t f, float *out) {
     case FMT_PCM32: for (int c = 0; c < ch; c++) out[c] = (int32_t)M32(a + 4 * c) / 2147483648.0f; break;
     default: for (int c = 0; c < ch; c++) out[c] = 0; break;
     }
+    return 1;
 }
 
 /* ---------------------------------------------------------------- events */
@@ -165,23 +525,53 @@ static void push_event(Voice *v, int method, uint32_t arg) {
 static int next_frame(Voice *v, float *out) {
     while (v->qn) {
         XBuf *b = &v->q[v->qhead];
+        if (v->fmt == FMT_WMA && !b->wma_done) {
+            /* The worker is still decoding this buffer. Emit the silence
+             * before the track's first frame and do not advance the cursor,
+             * so playback starts at sample 0. This can only happen before
+             * the buffer starts, never as a gap mid-track. */
+            for (int c = 0; c < v->in_ch; c++) out[c] = 0;
+            g_silence_frames++;
+            return 1;
+        }
         if (!b->started) {
             b->started = 1;
             push_event(v, 3, b->ctx);  /* OnBufferStart */
         }
         if (b->pos < b->end) {
-            read_frame(v, b, b->pos++, out);
-            v->played++;
-            if (b->pos >= b->end && b->loops_left && b->loop_len) {
-                if (b->loops_left != 255) b->loops_left--;
-                b->pos = b->loop_begin;
-                b->end = b->loop_begin + b->loop_len;
-                if (b->end > b->nframes) b->end = b->nframes;
-                push_event(v, 5, b->ctx);  /* OnLoopEnd */
+            if (read_frame(v, b, b->pos, out)) {
+                b->pos++;
+                v->played++;
+                if (b->pos >= b->end && b->loops_left && b->loop_len) {
+                    if (b->loops_left != 255) b->loops_left--;
+                    if (v->fmt == FMT_WMA) {
+                        /* all PCM is in memory: rewind the read cursor
+                         * instead of feeding the decoder again */
+                        b->pcm_rd = 0;
+                        b->pos = 0;
+                        b->end = b->nframes;
+                    } else {
+                        b->pos = b->loop_begin;
+                        b->end = b->loop_begin + b->loop_len;
+                        if (b->end > b->nframes) b->end = b->nframes;
+                    }
+                    push_event(v, 5, b->ctx);  /* OnLoopEnd */
+                }
+                return 1;
             }
-            return 1;
+            /* xWMA: decoded frames exhausted */
+            b->pos = b->end;
         }
         /* buffer finished */
+        if (v->fmt == FMT_WMA && b->loops_left && b->nframes) {
+            /* music loops start at 0, and the whole stream is decoded */
+            if (b->loops_left != 255) b->loops_left--;
+            b->pcm_rd = 0;
+            b->pos = 0;
+            b->end = b->nframes;
+            push_event(v, 5, b->ctx);  /* OnLoopEnd */
+            continue;
+        }
         push_event(v, 4, b->ctx);  /* OnBufferEnd */
         if (b->flags & 0x40) push_event(v, 2, 0);  /* XAUDIO2_END_OF_STREAM -> OnStreamEnd */
         free(b->decoded);
@@ -334,6 +724,7 @@ static void engine_pass(CPU *c, int frames, float *out) {
         Voice *v = g_voices[i];
         if (!v || !v->dead) continue;
         for (int k = 0; k < v->qn; k++) free(v->q[(v->qhead + k) % MAX_QUEUE].decoded);
+        if (v->wma) avcodec_free_context(&v->wma);
         free(v->acc);
         free(v);
         g_voices[i] = NULL;
@@ -354,13 +745,27 @@ static void *engine_main(void *arg) {
     int frames = g_rate * PASS_FRAMES_MS / 1000;
     float *out = malloc(sizeof(float) * 2 * (size_t)frames);
     uint64_t next = now_us();
+    g_mix_start_us = next;
+    g_stat_next_us = next + 5000000;
     for (;;) {
         if (g_dev) {
-            /* keep about 40 ms queued; a device that stops draining for 200 ms
-             * is dropped and mixing continues on the timer */
+            /* Keep at least four device buffers queued. SDL's OpenSL backend
+             * consumes one spec.size chunk per callback and pads the rest
+             * with silence when the queue is short (SDL_audio.c:569); with
+             * samples=2048 that chunk is 42.7 ms, so a 40 ms queue produced a
+             * dropout every callback. */
             Uint32 q0 = SDL_GetQueuedAudioSize(g_dev), q;
+            uint32_t qpre = q0;
+            uint32_t target = g_dev_buf_bytes ? 4 * g_dev_buf_bytes
+                                              : (uint32_t)(4 * frames * 2 * sizeof(float));
+            if (g_running && now_us() - g_mix_start_us > 2000000
+                    && now_us() >= g_q_ignore_until) {
+                if (qpre < g_qmin) g_qmin = qpre;
+                if (qpre > g_qmax) g_qmax = qpre;
+                if (!qpre) g_dry_passes++;
+            }
             uint64_t t0 = now_us();
-            while ((q = SDL_GetQueuedAudioSize(g_dev)) > (Uint32)(4 * frames * 2 * sizeof(float))) {
+            while ((q = SDL_GetQueuedAudioSize(g_dev)) > target) {
                 if (q < q0) { q0 = q; t0 = now_us(); }
                 else if (now_us() - t0 > 200000) {
                     LOG("xaudio2: audio device stalled, mixing silently");
@@ -378,8 +783,30 @@ static void *engine_main(void *arg) {
             next += PASS_FRAMES_MS * 1000;
         }
         if (!g_running) { usleep(PASS_FRAMES_MS * 1000); continue; }
+        uint64_t t_pass = now_us();
         engine_pass(c, frames, out);
-        if (g_dev) SDL_QueueAudio(g_dev, out, (Uint32)(sizeof(float) * 2 * (size_t)frames));
+        uint64_t pass_us = now_us() - t_pass;
+        if (pass_us > g_pass_window_max_us) g_pass_window_max_us = pass_us;
+        if (g_dev) {
+            SDL_QueueAudio(g_dev, out, (Uint32)(sizeof(float) * 2 * (size_t)frames));
+            audiodump_mix(out, frames);
+        }
+        if (g_audiodump > 0) {
+            uint64_t t = now_us();
+            if (t >= g_stat_next_us) {
+                LOG("xaudio2: mix qmin=%ums qmax=%ums dry=%llu passmax=%llums silence=%llums",
+                    g_qmin == ~0u ? 0u : g_qmin / g_dev_bytes_per_ms,
+                    g_qmax / g_dev_bytes_per_ms,
+                    g_dry_passes, g_pass_window_max_us / 1000,
+                    g_silence_frames * 1000 / (unsigned long long)g_rate);
+                g_qmin = ~0u;
+                g_qmax = 0;
+                g_dry_passes = 0;
+                g_pass_window_max_us = 0;
+                g_q_ignore_until = t + 300000;
+                g_stat_next_us = t + 5000000;
+            }
+        }
     }
     return NULL;
 }
@@ -387,6 +814,19 @@ static void *engine_main(void *arg) {
 static void engine_start_thread(void) {
     if (g_thread_started) return;
     g_thread_started = 1;
+    /* The 0.30 runtime uses OpenSL ES at 48 kHz (AAudio adds latency). An
+     * empty save/stockaudio.txt restores SDL's default backend. */
+    {
+        extern char g_save_dir[];
+        char path[1100];
+        snprintf(path, sizeof path, "%s/stockaudio.txt", g_save_dir);
+        if (access(path, F_OK) == 0) {
+            LOG("audio: SDL default backend (stockaudio override)");
+        } else {
+            SDL_SetHint(SDL_HINT_AUDIODRIVER, "openslES");
+            LOG("audio: openslES @ %d Hz (save/stockaudio.txt to restore SDL default)", g_rate);
+        }
+    }
     if (!SDL_WasInit(SDL_INIT_AUDIO)) SDL_InitSubSystem(SDL_INIT_AUDIO);
     SDL_AudioSpec want = {0}, have;
     want.freq = g_rate;
@@ -397,10 +837,30 @@ static void engine_start_thread(void) {
     g_dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
     rt_host_affinity_end();
     if (!g_dev) LOG("xaudio2: SDL_OpenAudioDevice failed: %s (mixing silently)", SDL_GetError());
-    else SDL_PauseAudioDevice(g_dev, 0);
+    else {
+        g_dev_buf_bytes = (uint32_t)(SDL_AUDIO_BITSIZE(have.format) / 8
+                                     * have.channels * have.samples);
+        if (have.samples)
+            g_dev_bytes_per_ms = (uint32_t)((uint64_t)g_dev_buf_bytes
+                                            * have.freq / have.samples / 1000);
+        LOG("xaudio2: device %d Hz, %d ch, %d samples, %d bits%s (%u B/buffer, %u B/ms)",
+            have.freq, have.channels, have.samples, SDL_AUDIO_BITSIZE(have.format),
+            SDL_AUDIO_ISFLOAT(have.format) ? " float" : "", g_dev_buf_bytes, g_dev_bytes_per_ms);
+        SDL_PauseAudioDevice(g_dev, 0);
+    }
+    audiodump_begin();
     pthread_t t;
     pthread_create(&t, NULL, engine_main, NULL);
     pthread_detach(t);
+    static int decode_started;
+    if (!decode_started) {
+        decode_started = 1;
+        pthread_t d;
+        pthread_create(&d, NULL, wma_decode_main, (void *)0L);   /* short buffers */
+        pthread_detach(d);
+        pthread_create(&d, NULL, wma_decode_main, (void *)1L);   /* long buffers */
+        pthread_detach(d);
+    }
 }
 
 /* ---------------------------------------------------------------- voices */
@@ -527,7 +987,10 @@ SHIM(xv_DestroyVoice) {
     if (!g_running) {  /* no engine pass will free it */
         pthread_mutex_lock(&g_lock);
         for (int i = 0; i < MAX_VOICES; i++)
-            if (g_voices[i] == v) { free(v->acc); free(v); g_voices[i] = NULL; }
+            if (g_voices[i] == v) {
+                if (v->wma) avcodec_free_context(&v->wma);
+                free(v->acc); free(v); g_voices[i] = NULL;
+            }
         pthread_mutex_unlock(&g_lock);
     }
     RET(0, 1);
@@ -550,7 +1013,24 @@ SHIM(xs_SubmitSourceBuffer) {
     x->loop_len = M32(b + 24);
     x->loop_count = M32(b + 28);
     x->ctx = M32(b + 32);
-    if (v->fmt == FMT_ADPCM && v->block_align && v->spb) {
+    if (v->fmt == FMT_WMA) {
+        static unsigned s_wma_id;
+        x->wma_off = 0;
+        x->wma_done = 0;
+        x->decoding = 0;
+        x->pcm_n = x->pcm_rd = x->pcm_cap = 0;
+        x->decoded = NULL;
+        x->id = ++s_wma_id;
+        x->nframes = 0;
+        x->pos = 0;
+        x->end = 0;
+        if (x->id <= 3)
+            LOG("xaudio2: xWMA stream %u: %u bytes (%d ch, %d Hz, block %d)",
+                x->id, x->bytes, v->in_ch, v->rate, v->block_align);
+        /* The decode worker picks this up and turns the whole compressed
+         * buffer into PCM; the mixer waits for it (silence before the first
+         * frame) instead of ever decoding or padding mid-stream. */
+    } else if (v->fmt == FMT_ADPCM && v->block_align && v->spb) {
         uint32_t nb = x->bytes / (uint32_t)v->block_align;
         x->nframes = nb * (uint32_t)v->spb;
         x->decoded = malloc(sizeof(int16_t) * (size_t)x->nframes * (size_t)v->in_ch + 2);
@@ -561,10 +1041,12 @@ SHIM(xs_SubmitSourceBuffer) {
     } else {
         x->nframes = v->bpf ? x->bytes / (uint32_t)v->bpf : 0;
     }
-    x->pos = x->play_begin < x->nframes ? x->play_begin : x->nframes;
-    x->end = x->play_len ? x->play_begin + x->play_len : x->nframes;
-    if (x->end > x->nframes) x->end = x->nframes;
-    if (!x->loop_len && x->loop_count) x->loop_len = x->end - x->loop_begin;
+    if (v->fmt != FMT_WMA) {
+        x->pos = x->play_begin < x->nframes ? x->play_begin : x->nframes;
+        x->end = x->play_len ? x->play_begin + x->play_len : x->nframes;
+        if (x->end > x->nframes) x->end = x->nframes;
+        if (!x->loop_len && x->loop_count) x->loop_len = x->end - x->loop_begin;
+    }
     x->loops_left = x->loop_count == 255 ? 255 : (int)x->loop_count;
     v->qn++;
     pthread_mutex_unlock(&g_lock);
@@ -573,13 +1055,28 @@ SHIM(xs_SubmitSourceBuffer) {
 SHIM(xs_FlushSourceBuffers) {
     Voice *v = V;
     pthread_mutex_lock(&g_lock);
-    /* every queued buffer but the playing one ends, reporting OnBufferEnd on
-     * the next pass: keep the current one, mark the rest finished */
-    for (int k = v->running ? 1 : 0; k < v->qn; k++) {
-        XBuf *b = &v->q[(v->qhead + k) % MAX_QUEUE];
-        b->pos = b->end;
-        b->loops_left = 0;
-        b->flags &= ~0x40u;
+    if (v->fmt == FMT_WMA) {
+        /* flushing stops every xWMA sound: mark all buffers finished and
+         * reset the decoder for whatever the game submits next */
+        for (int k = 0; k < v->qn; k++) {
+            XBuf *b = &v->q[(v->qhead + k) % MAX_QUEUE];
+            b->wma_done = 1;
+            if (b->decoding == 1) b->decoding = 2;  /* drop the in-flight result */
+            b->pcm_n = b->pcm_rd = 0;
+            b->pos = b->end;
+            b->loops_left = 0;
+            b->flags &= ~0x40u;
+        }
+        if (v->wma) avcodec_flush_buffers(v->wma);
+    } else {
+        /* every queued buffer but the playing one ends, reporting OnBufferEnd
+         * on the next pass: keep the current one, mark the rest finished */
+        for (int k = v->running ? 1 : 0; k < v->qn; k++) {
+            XBuf *b = &v->q[(v->qhead + k) % MAX_QUEUE];
+            b->pos = b->end;
+            b->loops_left = 0;
+            b->flags &= ~0x40u;
+        }
     }
     if (!v->running && v->qn && !g_running) {  /* stopped engine: drop at once */
         for (int k = 0; k < v->qn; k++) free(v->q[(v->qhead + k) % MAX_QUEUE].decoded);

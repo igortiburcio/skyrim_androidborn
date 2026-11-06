@@ -7,7 +7,7 @@
 #define DLL_EXTRA      "binkw32.dll"
 #define GAME_WIN_DIR   "C:\\Skyrim"
 #define GAME_WIN_PREFIX "\\skyrim\\"
-#define GAME_TITLE     "Skyrim"
+#define GAME_TITLE     "Skyrim Androidborn"
 #define GAME_PKG_DIR   "com.tj.skyrim"
 #elif defined(GAME_MARVEL)
 #define GAME_EXE       "LEGOMARVEL.exe"

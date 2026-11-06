@@ -1,23 +1,21 @@
+#include <array>
+#include <cstdlib>
+#include <filesystem>
 #include <numeric>
+
+#ifdef __linux__
+#include <unistd.h>
+#include <limits.h>
+#endif
 
 #include "util_env.h"
 
+#include "./com/com_include.h"
+
 namespace dxvk::env {
 
-#ifndef DXVK_NATIVE
-  constexpr char dirSlash = '\\';
-#else
-  constexpr char dirSlash = '/';
-#endif
-
-
   std::string getEnvVar(const char* name) {
-#ifdef DXVK_NATIVE
-    char* result = std::getenv(name);
-    return (result)
-      ? result
-      : "";
-#else
+#ifdef _WIN32
     std::vector<WCHAR> result;
     result.resize(MAX_PATH + 1);
 
@@ -25,6 +23,9 @@ namespace dxvk::env {
     result.resize(len);
 
     return str::fromws(result.data());
+#else
+    const char* result = std::getenv(name);
+    return result ? result : "";
 #endif
   }
 
@@ -48,7 +49,7 @@ namespace dxvk::env {
 
   std::string getExeName() {
     std::string fullPath = getExePath();
-    auto n = fullPath.find_last_of(dirSlash);
+    auto n = fullPath.find_last_of(env::PlatformDirSlash);
     
     return (n != std::string::npos)
       ? fullPath.substr(n + 1)
@@ -58,7 +59,7 @@ namespace dxvk::env {
 
   std::string getExeBaseName() {
     auto exeName = getExeName();
-#ifndef DXVK_NATIVE
+#ifdef _WIN32
     auto extp = matchFileExtension(exeName, "exe");
 
     if (extp != std::string::npos)
@@ -67,5 +68,61 @@ namespace dxvk::env {
 
     return exeName;
   }
+
+
+#ifndef DXVK_NATIVE
+  std::string getExePath() {
+#if defined(_WIN32)
+    std::vector<WCHAR> exePath;
+    exePath.resize(MAX_PATH + 1);
+
+    DWORD len = ::GetModuleFileNameW(NULL, exePath.data(), MAX_PATH);
+    exePath.resize(len);
+
+    return str::fromws(exePath.data());
+#elif defined(__linux__)
+    std::array<char, PATH_MAX> exePath = {};
+
+    size_t count = readlink("/proc/self/exe", exePath.data(), exePath.size());
+
+    return std::string(exePath.begin(), exePath.begin() + count);
+#endif
+  }
+#endif
+  
+  
+#ifndef DXVK_NATIVE
+  void setThreadName(const std::string& name) {
+#ifdef _WIN32
+    using SetThreadDescriptionProc = HRESULT (WINAPI *) (HANDLE, PCWSTR);
+
+    static auto proc = reinterpret_cast<SetThreadDescriptionProc>(
+      ::GetProcAddress(::GetModuleHandleW(L"kernel32.dll"), "SetThreadDescription"));
+
+    if (proc != nullptr) {
+      auto wideName = std::vector<WCHAR>(name.length() + 1);
+      str::tows(name.c_str(), wideName.data(), wideName.size());
+      (*proc)(::GetCurrentThread(), wideName.data());
+    }
+#else
+    std::array<char, 16> posixName = {};
+    dxvk::str::strlcpy(posixName.data(), name.c_str(), 16);
+    ::pthread_setname_np(pthread_self(), posixName.data());
+#endif
+  }
+#endif
+
+
+#ifndef DXVK_NATIVE
+  bool createDirectory(const std::string& path) {
+#ifdef _WIN32
+    WCHAR widePath[MAX_PATH];
+    str::tows(path.c_str(), widePath);
+    return !!CreateDirectoryW(widePath, nullptr);
+#else
+    return std::filesystem::create_directories(path);
+#endif
+  }
+#endif
   
 }

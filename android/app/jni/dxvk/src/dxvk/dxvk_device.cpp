@@ -59,6 +59,14 @@ namespace dxvk {
   }
 
 
+  DxvkFramebufferSize DxvkDevice::getDefaultFramebufferSize() const {
+    return DxvkFramebufferSize {
+      m_properties.core.properties.limits.maxFramebufferWidth,
+      m_properties.core.properties.limits.maxFramebufferHeight,
+      m_properties.core.properties.limits.maxFramebufferLayers };
+  }
+
+
   VkPipelineStageFlags DxvkDevice::getShaderPipelineStages() const {
     VkPipelineStageFlags result = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
                                 | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT
@@ -122,18 +130,15 @@ namespace dxvk {
   }
   
   
+  Rc<DxvkFence> DxvkDevice::createFence(
+    const DxvkFenceCreateInfo& fenceInfo) {
+    return new DxvkFence(this, fenceInfo);
+  }
+  
+  
   Rc<DxvkFramebuffer> DxvkDevice::createFramebuffer(
-    const DxvkRenderTargets& renderTargets) {
-    const DxvkFramebufferSize defaultSize = {
-      m_properties.core.properties.limits.maxFramebufferWidth,
-      m_properties.core.properties.limits.maxFramebufferHeight,
-      m_properties.core.properties.limits.maxFramebufferLayers };
-    
-    auto renderPassFormat = DxvkFramebuffer::getRenderPassFormat(renderTargets);
-    auto renderPassObject = m_objects.renderPassPool().getRenderPass(renderPassFormat);
-    
-    return new DxvkFramebuffer(m_vkd,
-      renderPassObject, renderTargets, defaultSize);
+    const DxvkFramebufferInfo&  info) {
+    return new DxvkFramebuffer(m_vkd, info);
   }
   
   
@@ -154,14 +159,14 @@ namespace dxvk {
   Rc<DxvkImage> DxvkDevice::createImage(
     const DxvkImageCreateInfo&  createInfo,
           VkMemoryPropertyFlags memoryType) {
-    return new DxvkImage(m_vkd, createInfo, m_objects.memoryManager(), memoryType);
+    return new DxvkImage(this, createInfo, m_objects.memoryManager(), memoryType);
   }
   
   
   Rc<DxvkImage> DxvkDevice::createImageFromVkImage(
     const DxvkImageCreateInfo&  createInfo,
           VkImage               image) {
-    return new DxvkImage(m_vkd, createInfo, image);
+    return new DxvkImage(this, createInfo, image);
   }
   
   Rc<DxvkImageView> DxvkDevice::createImageView(
@@ -174,19 +179,6 @@ namespace dxvk {
   Rc<DxvkSampler> DxvkDevice::createSampler(
     const DxvkSamplerCreateInfo&  createInfo) {
     return new DxvkSampler(this, createInfo);
-  }
-  
-  
-  Rc<DxvkShader> DxvkDevice::createShader(
-          VkShaderStageFlagBits     stage,
-          uint32_t                  slotCount,
-    const DxvkResourceSlot*         slotInfos,
-    const DxvkInterfaceSlots&       iface,
-    const SpirvCodeBuffer&          code) {
-    return new DxvkShader(stage,
-      slotCount, slotInfos, iface, code,
-      DxvkShaderOptions(),
-      DxvkShaderConstData());
   }
   
   
@@ -264,6 +256,24 @@ namespace dxvk {
     }
 
     return result;
+  }
+
+
+  void DxvkDevice::waitForResource(const Rc<DxvkResource>& resource, DxvkAccess access) {
+    if (resource->isInUse(access)) {
+      auto t0 = dxvk::high_resolution_clock::now();
+
+      m_submissionQueue.synchronizeUntil([resource, access] {
+        return !resource->isInUse(access);
+      });
+
+      auto t1 = dxvk::high_resolution_clock::now();
+      auto us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
+
+      std::lock_guard<sync::Spinlock> lock(m_statLock);
+      m_statCounters.addCtr(DxvkStatCounter::GpuSyncCount, 1);
+      m_statCounters.addCtr(DxvkStatCounter::GpuSyncTicks, us.count());
+    }
   }
   
   

@@ -5,19 +5,27 @@
 namespace dxvk {
   
   DxvkPipelineManager::DxvkPipelineManager(
-    const DxvkDevice*         device,
+          DxvkDevice*         device,
           DxvkRenderPassPool* passManager)
   : m_device    (device),
-    m_cache     (new DxvkPipelineCache(device->vkd())) {
+    m_cache     (new DxvkPipelineCache(device->vkd(),
+                   device->adapter()->deviceProperties())) {
     std::string useStateCache = env::getEnvVar("DXVK_STATE_CACHE");
     
     if (useStateCache != "0" && device->config().enableStateCache)
       m_stateCache = new DxvkStateCache(device, this, passManager);
+
+    if (device->config().enableAsync) {
+      m_compiler = new DxvkPipelineCompiler();
+      Logger::info("Port: async graphics pipeline compile ON (dxvk.enableAsync = True)");
+    } else {
+      Logger::info("Port: async graphics pipeline compile OFF (dxvk.enableAsync = True to enable)");
+    }
   }
   
   
   DxvkPipelineManager::~DxvkPipelineManager() {
-    
+    this->stopWorkerThreads();
   }
   
   
@@ -75,14 +83,28 @@ namespace dxvk {
 
 
   bool DxvkPipelineManager::isCompilingShaders() const {
-    return m_stateCache != nullptr
-        && m_stateCache->isCompilingShaders();
+    return (m_stateCache != nullptr
+        && m_stateCache->isCompilingShaders())
+        || (m_compiler != nullptr
+        && m_compiler->isCompilingShaders());
   }
 
 
   void DxvkPipelineManager::stopWorkerThreads() const {
     if (m_stateCache != nullptr)
       m_stateCache->stopWorkerThreads();
+    if (m_compiler != nullptr)
+      m_compiler->stopWorkerThreads();
+  }
+
+
+  void DxvkPipelineManager::queueAsyncCompilation(
+          DxvkGraphicsPipeline*              pipeline,
+          DxvkGraphicsPipelineInstance*      instance,
+    const DxvkGraphicsPipelineStateInfo&     state,
+    const DxvkRenderPass*                    renderPass) {
+    if (m_compiler != nullptr)
+      m_compiler->queueCompilation(pipeline, instance, state, renderPass);
   }
   
 }

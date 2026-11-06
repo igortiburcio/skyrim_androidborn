@@ -4,6 +4,7 @@
 #include "dxso_header.h"
 #include "dxso_modinfo.h"
 #include "dxso_isgn.h"
+#include "dxso_util.h"
 
 #include "../d3d9/d3d9_constant_layout.h"
 #include "../d3d9/d3d9_shader_permutations.h"
@@ -255,6 +256,7 @@ namespace dxvk {
     const DxsoDefinedConstants& constants() { return m_constants; }
     uint32_t usedSamplers() const { return m_usedSamplers; }
     uint32_t usedRTs() const { return m_usedRTs; }
+    uint32_t maxDefinedConstant() const { return m_maxDefinedConstant; }
 
   private:
 
@@ -265,6 +267,7 @@ namespace dxvk {
 
     DxsoShaderMetaInfo         m_meta;
     DxsoDefinedConstants       m_constants;
+    uint32_t                   m_maxDefinedConstant;
 
     SpirvModule                m_module;
 
@@ -303,7 +306,10 @@ namespace dxvk {
 
     ////////////////////////////////////
     // Ptr to the constant buffer array
-    uint32_t m_cBuffer;
+    uint32_t m_cBuffer = 0;
+    uint32_t m_cFloatBuffer = 0;
+    uint32_t m_cIntBuffer = 0;
+    uint32_t m_cBoolBuffer = 0;
 
     ////////////////////////////////////////
     // Constant buffer deffed mappings
@@ -350,7 +356,10 @@ namespace dxvk {
     ////////////////////////////////////////////
     // Inter-stage shader interface slots. Also
     // covers vertex input and fragment output.
-    DxvkInterfaceSlots m_interfaceSlots;
+    uint32_t m_inputMask = 0u;
+    uint32_t m_outputMask = 0u;
+    uint32_t m_pushConstOffset = 0u;
+    uint32_t m_pushConstSize = 0u;
 
     ///////////////////////////////////
     // Shader-specific data structures
@@ -374,6 +383,9 @@ namespace dxvk {
 
     //////////////////////
     // Common shader dcls
+    template<DxsoConstantBufferType ConstantBufferType>
+    int emitDclSwvpConstantBuffer();
+
     void emitDclConstantBuffer();
 
     void emitDclInputArray();
@@ -427,14 +439,14 @@ namespace dxvk {
             DxsoTextureType type);
 
     bool defineInput(uint32_t idx) {
-      bool alreadyDefined = m_interfaceSlots.inputSlots & 1u << idx;
-      m_interfaceSlots.inputSlots |= 1u << idx;
+      bool alreadyDefined = m_inputMask & 1u << idx;
+      m_inputMask |= 1u << idx;
       return alreadyDefined;
     }
 
     bool defineOutput(uint32_t idx) {
-      bool alreadyDefined = m_interfaceSlots.outputSlots & 1u << idx;
-      m_interfaceSlots.outputSlots |= 1u << idx;
+      bool alreadyDefined = m_outputMask & 1u << idx;
+      m_outputMask |= 1u << idx;
       return alreadyDefined;
     }
 
@@ -537,7 +549,29 @@ namespace dxvk {
     DxsoRegisterValue emitSaturate(
             DxsoRegisterValue       srcValue);
 
+    DxsoRegisterValue emitMulOperand(
+            DxsoRegisterValue       operand,
+            DxsoRegisterValue       other);
+
+    DxsoRegisterValue emitMul(
+            DxsoRegisterValue       a,
+            DxsoRegisterValue       b);
+
+    DxsoRegisterValue emitFma(
+            DxsoRegisterValue       a,
+            DxsoRegisterValue       b,
+            DxsoRegisterValue       c);
+
     DxsoRegisterValue emitDot(
+            DxsoRegisterValue       a,
+            DxsoRegisterValue       b);
+
+    DxsoRegisterValue emitMix(
+            DxsoRegisterValue       x,
+            DxsoRegisterValue       y,
+            DxsoRegisterValue       a);
+
+    DxsoRegisterValue emitCross(
             DxsoRegisterValue       a,
             DxsoRegisterValue       b);
 
@@ -678,6 +712,11 @@ namespace dxvk {
     
     uint32_t getPointerTypeId(
       const DxsoRegisterInfo& type);
+
+
+    bool isSwvp() {
+      return m_layout->bitmaskCount != 1;
+    }
 
   };
 

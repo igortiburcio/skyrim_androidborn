@@ -3,6 +3,7 @@
  * thread. The primary buffer only exists to satisfy the API. */
 #include "hcom.h"
 #include <SDL2/SDL.h>
+#include <unistd.h>
 
 #define MIX_RATE 44100
 #define MAX_BUFFERS 512
@@ -82,12 +83,20 @@ static void mix_cb(void *ud, Uint8 *stream, int len) {
 
 static void audio_open(void) {
     if (g_dev) return;
+    /* Same backend choice as XAudio2: OpenSL ES at 48 kHz unless
+     * save/stockaudio.txt asks for SDL's default. */
+    {
+        extern char g_save_dir[];
+        char path[1100];
+        snprintf(path, sizeof path, "%s/stockaudio.txt", g_save_dir);
+        if (access(path, F_OK) != 0) SDL_SetHint(SDL_HINT_AUDIODRIVER, "openslES");
+    }
     g_mix_lock = SDL_CreateMutex();
     SDL_AudioSpec want = {0}, have;
     want.freq = MIX_RATE;
     want.format = AUDIO_F32SYS;
     want.channels = 2;
-    want.samples = 1024;
+    want.samples = 2048;
     want.callback = mix_cb;
     rt_host_affinity_begin();  /* SDL's audio thread runs no guest code */
     g_dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
