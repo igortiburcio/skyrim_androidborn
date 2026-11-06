@@ -1,6 +1,6 @@
-// On-screen touch controls: a virtual Xbox pad (left stick, A/B/X/Y,
-// shoulders, Start/Back) that feeds the game's XInput input, drawn over
-// each frame with D3D9 just before Present.
+// On-screen touch controls: a virtual Xbox pad (left stick, right look area,
+// A/B/X/Y, LT/RT, shoulders, Start/Back) that feeds the game's XInput input,
+// drawn over each frame with D3D9 just before Present.
 //
 // Available on Android; on desktop enable with LB_TOUCH=1 (mouse clicks
 // then act as touches for testing). Where available, the PC-only "Vertical
@@ -20,45 +20,38 @@ extern "C" void input_set_virtual(uint16_t buttons, int16_t lx, int16_t ly, int1
 
 namespace {
 // Layout in units of screen height, anchored to a corner (ax, ay in {0,1}).
-struct Button { const char *name; uint16_t bit; float ax, ay, dx, dy, r; uint32_t color; };
+struct Button { const char *name; uint16_t bit; float ax, ay, dx, dy, r; uint32_t color; uint8_t trig; };
 const Button k_buttons[] = {
-    {"A", 0x1000, 1, 1, -0.20f, -0.14f, 0.075f, 0xFF40C040},
-    {"B", 0x2000, 1, 1, -0.08f, -0.27f, 0.075f, 0xFFE04040},
-    {"X", 0x4000, 1, 1, -0.32f, -0.27f, 0.075f, 0xFF4080F0},
-    {"Y", 0x8000, 1, 1, -0.20f, -0.40f, 0.075f, 0xFFF0D040},
-    {"LB", 0x0100, 0, 0, 0.12f, 0.30f, 0.06f, 0xFFB0B0B0},
-    {"RB", 0x0200, 1, 0, -0.12f, 0.30f, 0.06f, 0xFFB0B0B0},
-    {"Back", 0x0020, 0, 0, 0.36f, 0.07f, 0.045f, 0xFFD0D0D0},
-    {"Start", 0x0010, 1, 0, -0.36f, 0.07f, 0.045f, 0xFFFFFFFF},
+    {"A", 0x1000, 1, 1, -0.20f, -0.14f, 0.075f, 0xFF40C040, 0},
+    {"B", 0x2000, 1, 1, -0.08f, -0.27f, 0.075f, 0xFFE04040, 0},
+    {"X", 0x4000, 1, 1, -0.32f, -0.27f, 0.075f, 0xFF4080F0, 0},
+    {"Y", 0x8000, 1, 1, -0.20f, -0.40f, 0.075f, 0xFFF0D040, 0},
+    {"LB", 0x0100, 0, 0, 0.12f, 0.30f, 0.06f, 0xFFB0B0B0, 0},
+    {"RB", 0x0200, 1, 0, -0.12f, 0.30f, 0.06f, 0xFFB0B0B0, 0},
+    {"LT", 0, 0, 0, 0.12f, 0.42f, 0.06f, 0xFFB0B0B0, 1},
+    {"RT", 0, 1, 0, -0.12f, 0.42f, 0.06f, 0xFFB0B0B0, 2},
+    {"Back", 0x0020, 0, 0, 0.36f, 0.07f, 0.045f, 0xFFD0D0D0, 0},
+    {"Start", 0x0010, 1, 0, -0.36f, 0.07f, 0.045f, 0xFFFFFFFF, 0},
 };
 const int NB = sizeof k_buttons / sizeof k_buttons[0];
 const float STICK_X = 0.24f, STICK_Y = -0.26f, STICK_R = 0.17f; // from bottom-left
+const float LOOK_R = 0.15f;                                    // right look area radius
 // Keyboard button, top-left: shows or hides the phone's keyboard. It stays
 // on screen when the touch controls are switched off.
 const Button k_kbd = {"Keyboard", 0, 0, 0, 0.08f, 0.07f, 0.045f, 0xFFE0E0E0};
 const int KBD = 100;          // Finger::button value for the keyboard button
 
-struct Finger { SDL_FingerID id; int button; bool stick; float x, y; bool used; };
+struct Finger { SDL_FingerID id; int button; int stick; float x, y; float ax, ay; bool used; };
 Finger g_fingers[10];
-float g_stick_x, g_stick_y;   // knob offset, -1..1
+float g_stick_x, g_stick_y;      // left knob offset, -1..1
+float g_stick_rx, g_stick_ry;    // right look offset, -1..1
+bool g_look_active;
+float g_look_x, g_look_y;        // right look anchor, 0..1
 bool g_available, g_decided, g_seen, g_was_on;
 bool g_touch_on = true;       // the player's choice, kept in <save>/touch.cfg
 uint16_t g_buttons;
+uint8_t g_lt, g_rt;
 float g_aspect = 16.f / 9.f;  // width / height of the screen
-
-/* The overlay hides itself after two seconds without a touch. While it is
- * hidden the controls are disabled: the first touch only brings it back. */
-uint32_t g_last_touch_ms;
-bool g_touch_clock, g_touch_shown = true;
-
-static uint32_t touch_now() {
-    uint32_t now = SDL_GetTicks();
-    if (!g_touch_clock) {
-        g_touch_clock = true;
-        g_last_touch_ms = now;
-    }
-    return now;
-}
 
 // The game's VSync option byte, which the menu toggles and the settings save.
 const uint32_t G_VSYNC_OPTION = 0x9D0F3C;
@@ -92,8 +85,10 @@ bool enabled() {
     if (g_was_on && !on) {
         // Switched off in the menu: release everything the overlay was holding.
         for (auto &g : g_fingers) g.used = false;
-        g_stick_x = g_stick_y = 0;
+        g_stick_x = g_stick_y = g_stick_rx = g_stick_ry = 0;
+        g_look_active = false;
         g_buttons = 0;
+        g_lt = g_rt = 0;
         input_set_virtual(0, 0, 0, 0, 0, 0, 0);
     }
     g_was_on = on;
@@ -123,28 +118,51 @@ int hit_button(float x, float y) {
 
 void update() {
     uint16_t b = 0;
-    float sx = 0, sy = 0;
+    float sx = 0, sy = 0, rx = 0, ry = 0;
+    uint8_t lt = 0, rt = 0;
+    bool right_used = false;
+    g_look_active = false;
     for (auto &f : g_fingers) {
         if (!f.used) continue;
-        if (f.stick) {
+        if (f.stick == 1) {
             float cx, cy;
             stick_pos(&cx, &cy);
             sx = (f.x - cx) * g_aspect / STICK_R;
             sy = (f.y - cy) / STICK_R;
             float l = std::sqrt(sx * sx + sy * sy);
             if (l > 1) { sx /= l; sy /= l; }
+        } else if (f.stick == 2) {
+            if (right_used) continue;
+            right_used = true;
+            g_look_active = true;
+            g_look_x = f.ax;
+            g_look_y = f.ay;
+            rx = (f.x - f.ax) * g_aspect / LOOK_R;
+            ry = -(f.y - f.ay) / LOOK_R;
+            float l = std::sqrt(rx * rx + ry * ry);
+            if (l > 1) { rx /= l; ry /= l; }
         } else {
             // a finger may slide between buttons
             if (f.button == KBD) continue;
             int h = hit_button(f.x, f.y);
             if (h >= 0) f.button = h;
-            if (f.button >= 0) b |= k_buttons[f.button].bit;
+            if (f.button >= 0) {
+                const Button &btn = k_buttons[f.button];
+                if (btn.trig == 1) lt = 255;
+                else if (btn.trig == 2) rt = 255;
+                else b |= btn.bit;
+            }
         }
     }
     g_buttons = b;
     g_stick_x = sx;
     g_stick_y = sy;
-    input_set_virtual(b, (int16_t)(sx * 32767), (int16_t)(-sy * 32767), 0, 0, 0, 0);
+    g_stick_rx = rx;
+    g_stick_ry = ry;
+    g_lt = lt;
+    g_rt = rt;
+    input_set_virtual(b, (int16_t)(sx * 32767), (int16_t)(-sy * 32767),
+                      (int16_t)(rx * 32767), (int16_t)(ry * 32767), lt, rt);
 }
 } // namespace
 
@@ -180,13 +198,8 @@ extern "C" void touch_handle_event(const SDL_Event *e) {
     default:
         return;
     }
-    /* Auto-hide: after 2 s without a touch the overlay fades out and its
-     * controls are disabled. The touch that wakes it is consumed, so a blind
-     * tap cannot press a button that was not drawn. */
-    uint32_t now = touch_now();
-    bool was_hidden = (now - g_last_touch_ms) > 2250;
-    g_last_touch_ms = now;
-    if (was_hidden) return;
+    // The overlay stays visible while touch controls are on, so every touch
+    // acts immediately (there is no wake-up touch to consume).
     // window -> back buffer coordinates (the picture may be letterboxed)
     float vx0, vy0, vx1, vy1;
     bridge_view_rect(&vx0, &vy0, &vx1, &vy1);
@@ -207,13 +220,21 @@ extern "C" void touch_handle_event(const SDL_Event *e) {
         f->id = id;
         if (kbd) {
             f->button = KBD;
-            f->stick = false;
+            f->stick = 0;
             platform_text_input(1);
             return;
         }
         f->button = hit_button(x, y);
-        // anything on the left half that is not a button drives the stick
-        f->stick = f->button < 0 && x < 0.5f;
+        f->stick = 0;
+        if (f->button < 0) {
+            if (x < 0.5f) {
+                f->stick = 1;  /* movement */
+            } else {
+                f->stick = 2;  /* camera */
+                f->ax = x;
+                f->ay = y;
+            }
+        }
     }
     if (!f) return;
     f->x = x;
@@ -262,20 +283,6 @@ void quad(Vtx *v, float cx, float cy, float r, float w, float h, uint32_t color)
 void touch_draw(IDirect3DDevice9 *d) {
     if (!available()) return;
     bool on = enabled();
-    /* 2 s idle -> 250 ms fade-out; hidden controls are disabled and anything
-     * they were holding is released. */
-    uint32_t now = touch_now();
-    uint32_t idle = now - g_last_touch_ms;
-    float alpha = idle > 2000 ? 1.0f - (float)(idle - 2000) / 250.0f : 1.0f;
-    if (alpha < 0) alpha = 0;
-    bool visible = alpha > 0.01f;
-    if (!visible && g_touch_shown) {
-        for (auto &g : g_fingers) g.used = false;
-        g_stick_x = g_stick_y = 0;
-        g_buttons = 0;
-        input_set_virtual(0, 0, 0, 0, 0, 0, 0);
-    }
-    g_touch_shown = visible;
     IDirect3DSurface9 *bb = nullptr, *old = nullptr;
     if (FAILED(d->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb))) return;
     D3DSURFACE_DESC desc;
@@ -325,7 +332,7 @@ void touch_draw(IDirect3DDevice9 *d) {
     d->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
     d->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
 
-    Vtx v[6 * (NB + 2 + 11)];
+    Vtx v[6 * (NB + 16)];
     int n = 0;
     // keyboard button: a disc with two rows of keys and a space bar
     {
@@ -347,19 +354,22 @@ void touch_draw(IDirect3DDevice9 *d) {
         quad(v + 6 * n++, sx, sy, STICK_R, w, h, 0x90FFFFFF);
         quad(v + 6 * n++, sx + g_stick_x * STICK_R / g_aspect, sy + g_stick_y * STICK_R, STICK_R * 0.45f, w, h,
              0xD0FFFFFF);
+        if (g_look_active) {
+            quad(v + 6 * n++, g_look_x, g_look_y, LOOK_R, w, h, 0x60FFFFFF);
+            quad(v + 6 * n++, g_look_x + g_stick_rx * LOOK_R / g_aspect,
+                 g_look_y + g_stick_ry * LOOK_R, LOOK_R * 0.45f, w, h, 0xD0FFFFFF);
+        }
     }
     for (int i = 0; on && i < NB; i++) {
         float bx, by;
         button_pos(k_buttons[i], &bx, &by);
         uint32_t col = k_buttons[i].color;
-        uint32_t a = (g_buttons & k_buttons[i].bit) ? 0xF0 : 0x90;
+        uint32_t a;
+        if (k_buttons[i].trig == 1) a = g_lt ? 0xF0 : 0x90;
+        else if (k_buttons[i].trig == 2) a = g_rt ? 0xF0 : 0x90;
+        else a = (g_buttons & k_buttons[i].bit) ? 0xF0 : 0x90;
         quad(v + 6 * n++, bx, by, k_buttons[i].r, w, h, (col & 0xFFFFFF) | a << 24);
     }
-    if (alpha < 1.0f)
-        for (int i = 0; i < 6 * n; i++) {
-            uint32_t a = (v[i].color >> 24) & 0xFF;
-            v[i].color = (v[i].color & 0x00FFFFFF) | ((uint32_t)(a * alpha) << 24);
-        }
     d->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2 * n, v, sizeof(Vtx));
     d->EndScene();
     d->SetRenderTarget(0, old);

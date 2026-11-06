@@ -11,6 +11,21 @@ Skyrim Androidborn is a fork of
 [ttom795/Skyrim_Android](https://github.com/ttom795/Skyrim_Android), developed
 independently.
 
+## 0.1.2 — 2026-11-06
+
+Touch controls.
+
+### Touch
+- [Right-side look area — camera works on touch-only devices] Dragging on the
+  right half of the screen feeds the right stick to the game.
+- [LT/RT buttons — left and right hand attacks work on touch-only devices]
+  The triggers are now passed to the game instead of staying at zero.
+- [Overlay stays visible — the first touch acts immediately] The old 2-second
+  auto-hide consumed the first touch and disabled the controls; it is gone.
+
+### Notes
+Tested on a Retroid Pocket G2 (Adreno A22, Android 15).
+
 ## 0.1.1 — 2026-11-06
 
 Performance and heat pass.
