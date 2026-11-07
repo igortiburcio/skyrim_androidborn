@@ -11,6 +11,26 @@ Skyrim Androidborn is a fork of
 [ttom795/Skyrim_Android](https://github.com/ttom795/Skyrim_Android), developed
 independently.
 
+## 0.2.1 — 2026-11-07
+
+Blue weapon glitch and new-object flicker.
+
+### Fixes
+- [Pipeline cache save is now synchronized with pipeline creation — no more flat blue weapon or wrong draws]
+  The save thread takes an exclusive lock while pipeline creation holds a
+  shared lock, so the driver never reads the cache in the middle of a write.
+- [Old pipeline cache is discarded and new saves are checksummed — a corrupted cache can no longer come back]
+  The cache moved to a versioned file that is validated on load; the pre-fix
+  file is deleted on first launch and rebuilt cleanly.
+- [Turning off "Asynchronous rendering" stops new-object flicker — play without flashing at the cost of a hitch on first sight]
+  With async on, first-time objects can skip a frame while they compile; with
+  it off, loading a new effect can pause the frame instead.
+
+### Notes
+Tested on a Retroid Pocket G2 (Adreno A22, Android 15): launcher, save load
+and 30 fps with the fix installed; flicker gone with async off. The flat blue
+weapon was reproduced on both Adreno and Mali-G720 (Xiaomi 15T, PanVK).
+
 ## 0.2.0 — 2026-11-07
 
 Steam install, a simpler launcher and smaller game folders.

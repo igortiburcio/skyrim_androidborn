@@ -7,7 +7,7 @@ Vulkan 1.1.
 Tested on a **Retroid Pocket G2** (Adreno A22, Android 15). Also tested on a
 **Xiaomi 15T** (Mali-G720, Android 15) with the PanVK driver.
 
-Current version: **0.2.0** — see [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.2.1** — see [CHANGELOG.md](CHANGELOG.md).
 
 ## Screenshots
 
