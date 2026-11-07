@@ -9,16 +9,16 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The "Data files" tab: one row per .esm/.esp with its On/Off state and the
- * ▲▼ arrows that move it in the load order. Skyrim.esm shows up locked
- * (always on, like the engine treats it).
+ * The "Plugins" tab: one row per .esm/.esp with its On/Off state and the
+ * ▲▼ arrows that move it in the load order. Skyrim.esm and Update.esm show
+ * up locked (always on); the official masters keep their required position.
  */
 public final class PluginsSection implements LauncherWindow.Content {
 
     private final Widgets widgets;
     private final PluginRegistry registry;
 
-    private LinearLayout pane;
+    private LinearLayout host;
     private View firstRow;
 
     public PluginsSection(Widgets widgets, PluginRegistry registry) {
@@ -28,12 +28,17 @@ public final class PluginsSection implements LauncherWindow.Content {
 
     @Override
     public CharSequence title() {
-        return "Data files";
+        return "Plugins";
     }
 
     @Override
     public void build(LinearLayout pane) {
-        this.pane = pane;
+        buildInto(pane);
+    }
+
+    /** Adds the load order to a shared pane (Settings). */
+    public void buildInto(LinearLayout host) {
+        this.host = host;
         render();
     }
 
@@ -45,7 +50,7 @@ public final class PluginsSection implements LauncherWindow.Content {
     /** Re-reads the Data folder and redraws the rows. */
     public void reload() {
         registry.reload();
-        if (pane != null) render();
+        if (host != null) render();
     }
 
     /** Saves the order and the active set (when the activity pauses). */
@@ -61,10 +66,11 @@ public final class PluginsSection implements LauncherWindow.Content {
     /* ------------------------------------------------------------------ */
 
     private void render() {
-        pane.removeAllViews();
+        if (host == null) return;
+        host.removeAllViews();
         firstRow = null;
         if (registry.isEmpty()) {
-            TextView empty = widgets.text(pane, "No .esm/.esp in Data (choose the folder first)",
+            TextView empty = widgets.text(host, "No .esm/.esp in Data (choose the folder first)",
                     14, false);
             empty.setTextColor(widgets.hintColor());
             return;
@@ -95,12 +101,15 @@ public final class PluginsSection implements LauncherWindow.Content {
         wrapper.addView(row, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         if (firstRow == null) firstRow = row;
 
-        wrapper.addView(arrow("\u25B2", index, -1), new LinearLayout.LayoutParams(
-                widgets.dp(46), ViewGroup.LayoutParams.WRAP_CONTENT));
-        wrapper.addView(arrow("\u25BC", index, 1), new LinearLayout.LayoutParams(
-                widgets.dp(46), ViewGroup.LayoutParams.WRAP_CONTENT));
+        /* Official masters have a fixed position; only mods get arrows. */
+        if (!plugin.officialMaster()) {
+            wrapper.addView(arrow("\u25B2", index, -1), new LinearLayout.LayoutParams(
+                    widgets.dp(46), ViewGroup.LayoutParams.WRAP_CONTENT));
+            wrapper.addView(arrow("\u25BC", index, 1), new LinearLayout.LayoutParams(
+                    widgets.dp(46), ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
 
-        pane.addView(wrapper, lp);
+        host.addView(wrapper, lp);
     }
 
     private Button arrow(String glyph, final int index, final int by) {
@@ -113,8 +122,8 @@ public final class PluginsSection implements LauncherWindow.Content {
         registry.save();
         render();
         int to = index + by;
-        if (to >= 0 && to < pane.getChildCount()) {
-            LinearLayout wrapper = (LinearLayout) pane.getChildAt(to);
+        if (to >= 0 && to < host.getChildCount()) {
+            LinearLayout wrapper = (LinearLayout) host.getChildAt(to);
             // [0]=row [1]=▲ [2]=▼
             View target = wrapper.getChildAt(by < 0 ? 1 : 2);
             if (target != null) target.requestFocus();

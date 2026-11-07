@@ -1,2 +1,4 @@
 rootProject.name = 'Skyrim'
 include ':app'
+include ':steam'
+project(':steam').projectDir = new File(settingsDir, '../steam')

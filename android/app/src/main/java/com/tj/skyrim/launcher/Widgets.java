@@ -149,6 +149,27 @@ public final class Widgets {
         return b;
     }
 
+    /**
+     * The "New update" banner: a gold-filled button that stays highlighted
+     * even when it does not have focus. It sits apart from the menu.
+     */
+    public Button updateButton(String label, View.OnClickListener onClick) {
+        Button b = new Button(activity);
+        b.setText(label);
+        b.setTypeface(fonts.heading);
+        b.setTextSize(18);
+        b.setLetterSpacing(0.04f);
+        b.setAllCaps(false);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(24), 0, dp(24), 0);
+        b.setTextColor(OVER_GOLD);
+        b.setBackground(updateBackground());
+        b.setElevation(dp(8));
+        b.setOnClickListener(onClick);
+        focusable(b);
+        return b;
+    }
+
     /** Text over the artwork; a soft black glow keeps it readable. */
     public TextView overlayText(String s, int sp) {
         TextView t = new TextView(activity);
@@ -283,6 +304,17 @@ public final class Widgets {
                 {android.R.attr.state_selected},
                 {}},
                 new int[] {OVER_GOLD, OVER_GOLD, OVER_GOLD, TEXT});
+    }
+
+    /** The update banner: gold at rest, brighter when focused or pressed. */
+    private StateListDrawable updateBackground() {
+        StateListDrawable background = new StateListDrawable();
+        background.addState(new int[] {android.R.attr.state_pressed},
+                rounded(0xFFF2DFAA, dp(2), 0xFFF2DFAA));
+        background.addState(new int[] {android.R.attr.state_focused},
+                rounded(0xFFE8CE93, dp(2), 0xFFF2DFAA));
+        background.addState(new int[] {}, rounded(GOLD, dp(2), GOLD_DEEP));
+        return background;
     }
 
     /** Margins of a row inside a pane (8dp of air between rows). */

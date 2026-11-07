@@ -29,7 +29,6 @@ public final class LauncherChoices {
     final boolean asyncRendering;     /* compile shaders on background threads */
     final boolean sustainedPerformance;
     final boolean showFps;
-    final boolean nativeUi;      /* draw the UI at the display's resolution */
     final boolean touchControls;
     final boolean nintendoLayout;
     final int cameraMode;        /* 0 = fixed stick, 1 = touch drag */
@@ -40,7 +39,7 @@ public final class LauncherChoices {
                     boolean fxaa, boolean vsync, boolean depthOfField, boolean disableShadows,
                     boolean teofis, boolean disableTreeAnimations, boolean asyncRendering,
                     boolean sustainedPerformance,
-                    boolean showFps, boolean nativeUi, boolean touchControls, boolean nintendoLayout,
+                    boolean showFps, boolean touchControls, boolean nintendoLayout,
                     int cameraMode) {
         this.preset = preset;
         this.aspect = aspect;
@@ -64,7 +63,6 @@ public final class LauncherChoices {
         this.asyncRendering = asyncRendering;
         this.sustainedPerformance = sustainedPerformance;
         this.showFps = showFps;
-        this.nativeUi = nativeUi;
         this.touchControls = touchControls;
         this.nintendoLayout = nintendoLayout;
         this.cameraMode = cameraMode;

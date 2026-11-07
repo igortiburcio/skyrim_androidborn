@@ -81,7 +81,6 @@ public final class OptionsSection implements LauncherWindow.Content {
         toggle(pane, "async", "Asynchronous rendering", true);
         toggle(pane, "sustained", "Sustained performance mode", false);
         toggle(pane, "fps", "Show FPS counter", false);
-        toggle(pane, "nativeui", "Draw UI at native resolution", false);
         toggle(pane, "touch", "Touch controls", true);
         stepper(pane, "camera", "Camera control", CAMERA_MODES,
                 settings.option("camera", 1), null);
@@ -122,7 +121,7 @@ public final class OptionsSection implements LauncherWindow.Content {
                 flag("dof", true), flag("noshadows", false),
                 flag("teofis", false), flag("trees", false),
                 flag("async", true), flag("sustained", false),
-                flag("fps", false), flag("nativeui", false),
+                flag("fps", false),
                 flag("touch", true), flag("nintendo", false), value("camera", 1));
     }
 

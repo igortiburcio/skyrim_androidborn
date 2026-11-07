@@ -18,7 +18,6 @@ import java.util.Map;
  *   <li>Skyrim.ini (the game language),</li>
  *   <li>Plugins.txt and loadorder.txt (the Data Files),</li>
  *   <li>display.cfg and touch.cfg,</li>
- *   <li>the nativeui switch,</li>
  *   <li>port/dxvk.conf (the frame rate cap).</li>
  * </ul>
  */
@@ -52,14 +51,14 @@ public final class GameConfigWriter {
 
         writePrefs(game, new File(iniDir, "SkyrimPrefs.ini"), c);
         writeLanguageIni(new File(iniDir, "Skyrim.ini"), game, c);
-        writePlugins(iniDir, plan.plugins);
+        PluginFiles.write(plan.folder, plan.plugins);
 
         int[] aspect = modes.rawAspect(c.aspect);
         writeLine(new File(save, "display.cfg"), aspect[0] + " " + aspect[1]);
         writeLine(new File(save, "touch.cfg"),
                 (c.touchControls ? 1 : 0) + " " + (c.nintendoLayout ? 1 : 0) + " " + c.cameraMode);
 
-        writeSwitch(save, "nativeui.txt", c.nativeUi);
+        new File(save, "nativeui.txt").delete();
         writeSwitch(save, "teofis.txt", c.teofis);
         writeSwitch(save, "noasync.txt", !c.asyncRendering);
         writeDxvkConf(new File(game, "port/dxvk.conf"), c);
@@ -174,17 +173,6 @@ public final class GameConfigWriter {
         ini.put("Trees", "fUpdateBudget",
                 (extraLow || c.disableTreeAnimations) ? "0.0000" : "1.5000");
         ini.save(out);
-    }
-
-    /** Plugins.txt = active plugins, loadorder.txt = every plugin in order. */
-    private void writePlugins(File iniDir, List<Plugin> plugins) throws Exception {
-        StringBuilder active = new StringBuilder(), order = new StringBuilder();
-        for (Plugin p : plugins) {
-            order.append(p.name).append("\r\n");
-            if (p.on || p.alwaysOn()) active.append(p.name).append("\r\n");
-        }
-        writeRaw(new File(iniDir, "loadorder.txt"), order.toString());
-        writeRaw(new File(iniDir, "Plugins.txt"), active.toString());
     }
 
     /** The runtime reads a few empty "switch" files next to the saves. */

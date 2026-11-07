@@ -24,6 +24,10 @@ android/build/
 android/app/build/
 android/app/.cxx/
 android/local.properties
+steam/build/
 tools/__pycache__/
 desktop/build/
 .vscode/
+
+# DXVK log from desktop test runs
+/lb_*.log

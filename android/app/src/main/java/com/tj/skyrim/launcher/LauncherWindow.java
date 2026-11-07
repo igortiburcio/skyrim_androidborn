@@ -70,10 +70,13 @@ public final class LauncherWindow {
         overlay = new FrameLayout(activity);
         overlay.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        overlay.setElevation(widgets.dp(20));
         overlay.setVisibility(View.GONE);
 
         View scrim = new View(activity);
         scrim.setBackgroundColor(0x99000000);
+        /* touch dismisses the window; the gamepad must never focus the scrim */
+        scrim.setFocusable(false);
         scrim.setOnClickListener(v -> close());
         overlay.addView(scrim, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -127,6 +130,9 @@ public final class LauncherWindow {
 
     public void open(List<Content> tabs, int index) {
         if (!sameTabs(tabs)) rebuildTabs(tabs);
+        // A menu open starts at the tab's initial focus (top for Game Files),
+        // not where the last session left off; LB/RB keeps its own memory.
+        lastFocus.remove(index);
         sizePanel();
         overlay.setVisibility(View.VISIBLE);
         overlay.setAlpha(0f);
@@ -157,6 +163,7 @@ public final class LauncherWindow {
         panes.clear();
         lastFocus.clear();
         tabBar.removeAllViews();
+        underlineBar.removeAllViews();
         contentHost.removeAllViews();
         contents.addAll(tabs);
         buildTabs();

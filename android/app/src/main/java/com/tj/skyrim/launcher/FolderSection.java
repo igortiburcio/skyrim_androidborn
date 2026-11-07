@@ -43,11 +43,16 @@ public final class FolderSection implements LauncherWindow.Content {
 
     @Override
     public CharSequence title() {
-        return "Game folder";
+        return "Folder";
     }
 
     @Override
     public void build(LinearLayout pane) {
+        buildInto(pane);
+    }
+
+    /** Adds the folder block to a shared pane (Game Files). */
+    public void buildInto(LinearLayout pane) {
         pathText = widgets.text(pane, "", 16, false);
         detailText = widgets.text(pane, "", 14, false);
         detailText.setTextColor(widgets.hintColor());
@@ -69,8 +74,8 @@ public final class FolderSection implements LauncherWindow.Content {
         problems = check.problems(path);
         if (pathText != null) {
             pathText.setText(path == null
-                    ? "No folder chosen yet. Copy your Skyrim folder (with the 3 extra files) anywhere "
-                      + "outside Android/data, e.g. Internal storage/Skyrim, then choose it here."
+                    ? "No folder chosen yet. Put your Skyrim Data folder anywhere outside Android/data, "
+                      + "e.g. Internal storage/Skyrim/Data, then choose Internal storage/Skyrim here."
                     : path);
             detailText.setText(problems.isEmpty()
                     ? "Ready - everything the port needs is here."
@@ -98,6 +103,14 @@ public final class FolderSection implements LauncherWindow.Content {
         if (detailText != null) {
             detailText.setText(message);
             detailText.setTextColor(widgets.badColor());
+        }
+    }
+
+    /** Shows the result of a pick, download or removal. */
+    public void note(String message, boolean ok) {
+        if (detailText != null) {
+            detailText.setText(message);
+            detailText.setTextColor(ok ? widgets.okColor() : widgets.badColor());
         }
     }
 }

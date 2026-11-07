@@ -2,14 +2,13 @@ package com.tj.skyrim.launcher;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Everything the launcher persists, in one place: the chosen folder, the
- * selected options, the load order and active plugins, the selected GPU
- * driver, and a SHA-1 cache for the game executable check.
+ * selected options, the load order and active plugins, and the selected GPU
+ * driver.
  */
 public final class LauncherSettings {
 
@@ -29,6 +28,18 @@ public final class LauncherSettings {
 
     public void folder(String path) {
         prefs.edit().putString("folder", path).apply();
+    }
+
+    /**
+     * The folder a Steam download last completed into. It survives choosing
+     * another folder by hand, so the downloaded copy can still be removed.
+     */
+    public String steamFolder() {
+        return prefs.getString("steamFolder", null);
+    }
+
+    public void steamFolder(String path) {
+        prefs.edit().putString("steamFolder", path).apply();
     }
 
     /* ---- options (spinner indexes and checkbox states) ---- */
@@ -76,6 +87,15 @@ public final class LauncherSettings {
         prefs.edit().putString("pluginsOn", join(names)).apply();
     }
 
+    /** When the launcher last wrote Plugins.txt/loadorder.txt. */
+    public long pluginsWrittenAt() {
+        return prefs.getLong("pluginsWrittenAt", 0);
+    }
+
+    public void pluginsWrittenAt(long time) {
+        prefs.edit().putLong("pluginsWrittenAt", time).apply();
+    }
+
     /* ---- GPU driver ---- */
 
     /** The directory name of the selected driver, or "" for the system driver. */
@@ -87,19 +107,24 @@ public final class LauncherSettings {
         prefs.edit().putString("driver", dirName == null ? "" : dirName).apply();
     }
 
-    /* ---- SHA-1 cache (keyed by path, size and modification time) ---- */
+    /* ---- update download (survives a pause or a restart) ---- */
 
-    /** The cached hex for f, or null when it was not hashed yet or changed. */
-    public String cachedSha1(File f) {
-        String stamp = f.length() + ":" + f.lastModified();
-        String cached = prefs.getString("sha1:" + f.getAbsolutePath(), null);
-        return cached != null && cached.startsWith(stamp + "=")
-                ? cached.substring(stamp.length() + 1) : null;
+    /** The DownloadManager id of the update APK, or -1 when there is none. */
+    public long updateDownloadId() {
+        return prefs.getLong("updateDownloadId", -1);
     }
 
-    public void cacheSha1(File f, String hex) {
-        String stamp = f.length() + ":" + f.lastModified();
-        prefs.edit().putString("sha1:" + f.getAbsolutePath(), stamp + "=" + hex).apply();
+    public void updateDownloadId(long id) {
+        prefs.edit().putLong("updateDownloadId", id).apply();
+    }
+
+    /** The release version the saved download belongs to. */
+    public String updateVersion() {
+        return prefs.getString("updateVersion", "");
+    }
+
+    public void updateVersion(String version) {
+        prefs.edit().putString("updateVersion", version == null ? "" : version).apply();
     }
 
     /* ------------------------------------------------------------------ */

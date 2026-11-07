@@ -18,8 +18,13 @@ public final class Plugin {
         return name.toLowerCase().endsWith(".esm");
     }
 
-    /** Skyrim.esm: the engine loads it anyway, so the checkbox is locked. */
+    /** One of the five masters the engine requires at the top. */
+    boolean officialMaster() {
+        return PluginFiles.isOfficialMaster(name);
+    }
+
+    /** Skyrim.esm and Update.esm: the engine and the DLCs depend on them. */
     boolean alwaysOn() {
-        return name.equalsIgnoreCase("Skyrim.esm");
+        return name.equalsIgnoreCase("Skyrim.esm") || name.equalsIgnoreCase("Update.esm");
     }
 }

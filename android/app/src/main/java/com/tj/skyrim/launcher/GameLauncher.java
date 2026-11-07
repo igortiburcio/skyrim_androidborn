@@ -10,24 +10,20 @@ import java.io.OutputStream;
 
 /**
  * Starts the game with the Intent extras its SkyrimActivity expects: the game
- * folder, the FPS/touch overlays, the UI backbuffer size when the UI is drawn
- * at the native resolution, and the GPU driver to load (Turnip / Mr. Purple).
+ * folder, the FPS/touch overlays and the GPU driver to load (Turnip / Mr.
+ * Purple).
  */
 public final class GameLauncher {
 
     private GameLauncher() {}
 
-    public static void start(Activity from, LaunchPlan plan, DisplayModes modes) throws Exception {
+    public static void start(Activity from, LaunchPlan plan) throws Exception {
         Intent intent = new Intent();
         intent.setClassName("com.tj.skyrim", "com.tj.skyrim.SkyrimActivity");
         intent.putExtra("game", plan.folder);
         intent.putExtra("ui_fps", plan.choices.showFps ? 1 : 0);
         intent.putExtra("ui_touch", plan.choices.touchControls ? 1 : 0);
         intent.putExtra("sustained", plan.choices.sustainedPerformance ? 1 : 0);
-        if (plan.choices.nativeUi) {
-            intent.putExtra("bbW", modes.width());
-            intent.putExtra("bbH", modes.height());
-        }
         if (plan.driver != null) {
             /* libadrenotools can only dlopen from app-private storage: copy
              * the installed driver there and pass that path. */

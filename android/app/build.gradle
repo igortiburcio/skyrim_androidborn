@@ -15,8 +15,8 @@ android {
         buildConfigField "boolean", "DUAL", dual ? "true" : "false"
         minSdkVersion 28
         targetSdkVersion 29  // legacy storage: plain file access with the normal storage prompt
-        versionCode 100
-        versionName dual ? "0.1.5-dual" : "0.1.5"
+        versionCode 102
+        versionName dual ? "0.2.0-dual" : "0.2.0"
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_STL=c++_shared", "-DANDROID_PLATFORM=android-28"
@@ -51,4 +51,6 @@ android {
 
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation project(':steam')
+    implementation 'com.google.zxing:core:3.5.3'
 }

@@ -11,6 +11,58 @@ Skyrim Androidborn is a fork of
 [ttom795/Skyrim_Android](https://github.com/ttom795/Skyrim_Android), developed
 independently.
 
+## 0.2.0 — 2026-11-07
+
+Steam install, a simpler launcher and smaller game folders.
+
+### Steam
+- [Steam sign-in with a QR code — download the game data without a PC]
+  Scan the code with the Steam app; the session stays encrypted on the device
+  so the next launch only asks for Continue.
+- [Steam download of the 2011 game and DLCs — the downloaded folder is selected automatically]
+  The optional 4.7 GB high-resolution pack and the PC executable/DLLs are
+  skipped.
+- [Foreground download service — the transfer survives the screen turning off]
+  A notification shows the progress and has a Cancel button.
+- [Remove Steam download or Remove this game folder — reclaim storage without losing saves]
+  Both ask for a second tap; only Data and appinfo.bin are deleted, and
+  port/save stays.
+
+### Launcher
+- [Game folder only needs Data — no PC executable or DLLs to copy]
+  The executable images are built into the app and mapped at launch.
+- [Game Files is one screen; Settings holds Graphics, GPU Driver and Plugins — fewer clicks]
+  The menu is Play, Game Files and Settings, and the load order moved into
+  Settings.
+- [Built-in folder browser with Internal storage and SD card shortcuts — pick folders the system picker refuses]
+  Useful for SD-card roots and Download.
+- [Launcher checks GitHub for updates and installs them — no sideloading for each new version]
+  A New update board shows the patch notes and the download/install buttons.
+
+### Fixes
+- [Load order follows Plugins.txt and loadorder.txt — DLCs and mods load in the intended order]
+  The five official masters stay at the top in their required order, and the
+  launcher imports the files the game already uses.
+- [Enabled plugins now reach the game — changes in the launcher actually load in Skyrim]
+  Plugins.txt and loadorder.txt are written to port/save/Documents/Skyrim,
+  where the game reads them, and mirrored to Documents/My Games/Skyrim.
+- [The non-working "Draw UI at native resolution" option is gone — no misleading setting]
+  Choose the screen's own resolution when you want the sharpest UI.
+
+### Notes
+Tested on a Retroid Pocket G2 (Adreno A22, Android 15): QR and saved-session
+login, 8.4 GB Steam verification, menu, save list and 30 fps. The Retroid's
+background cleaner (`com.rp.settings`) force-stops apps when the screen turns
+off; exempt Skyrim Androidborn if a download stops.
+
+## 0.1.6 — 2026-11-06
+
+### Launcher
+- [Launcher checks GitHub for new releases — you are told when an update is available and can install it from the launcher]
+  A New update board appears on the right with the patch notes and the
+  download/install buttons. The APK downloads in the background and Android's
+  installer opens.
+
 ## 0.1.5 — 2026-11-06
 
 Touch controls.

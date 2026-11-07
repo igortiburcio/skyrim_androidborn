@@ -15,13 +15,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __ANDROID__
 #include <adrenotools/driver.h>
+#endif
 
 #include "rt.h"
 
 /* Defined in libdxvk_d3d9.so (vulkan_loader.cpp). */
 extern void skyrim_set_vulkan_loader(void *fn);
 
+#ifdef __ANDROID__
 void skyrim_port_init_vulkan_driver(void) {
     const char *dir = getenv("LB_DRIVER_DIR");
     const char *lib = getenv("LB_DRIVER_LIB");
@@ -57,3 +60,7 @@ void skyrim_port_init_vulkan_driver(void) {
     LOG("Port: GPU driver %s%s", dirBuf, lib);
     LOG("Port: custom Vulkan driver %s%s", dirBuf, lib);
 }
+#else
+/* The desktop build always uses the system Vulkan driver. */
+void skyrim_port_init_vulkan_driver(void) {}
+#endif

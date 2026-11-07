@@ -6,13 +6,22 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.hardware.gamepad" android:required="false" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application android:label="@string/app_name" android:icon="@mipmap/ic_launcher"
         android:allowBackup="false" android:requestLegacyExternalStorage="true" android:hardwareAccelerated="true"
         android:largeHeap="true" android:extractNativeLibs="true"
         android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+        <service android:name=".SteamDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
         <activity android:name="SkyrimActivity" android:label="@string/app_name"
             android:alwaysRetainTaskState="true" android:launchMode="singleInstance"
             android:screenOrientation="sensorLandscape"

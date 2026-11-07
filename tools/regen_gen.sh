@@ -4,6 +4,8 @@
 # GAME_DIR must contain TESV_unpacked.exe (TESV.exe with SteamStub removed by
 # Steamless), d3dx9_42.dll, binkw32.dll and X3DAudio1_7.dll. See the README.
 # Needs Python 3.10+: pip install capstone==5.0.9 pefile==2024.8.26
+# gen/ also gets image_*.c (the PE data sections the runtime maps), so the
+# released build no longer needs the exe or the DLLs in the game folder.
 set -e
 G=$(cd "${1:?usage: tools/regen_gen.sh GAME_DIR}" && pwd)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -24,4 +26,14 @@ python3 tools/lift.py "$EXE" analysis/functions.json gen exe
 python3 tools/lift.py "$D3DX" analysis/functions_d3dx.json gen d3dx9 08000000
 python3 tools/lift.py "$BINK" analysis/functions_bink.json gen bink 09000000
 python3 tools/lift.py "$X3DA" analysis/functions_x3da.json gen x3da 0A000000
+# The image blobs must come from the same files as the lifted code: their
+# addresses are baked into gen/*.c.  .reloc is dropped for the exe (mapped at
+# its preferred base) and kept for the DLLs (mapped at fixed bases).  .text is
+# kept: MSVC leaves jump tables inside the code section and the lifted code
+# reads them as data (f_F52E30's memcpy is one example).  LB_IMAGE_GUARD only
+# makes sense after an experimental --text drop.
+python3 tools/embed_image.py "$EXE" gen/image_exe.c --symbol exe --reloc drop --text keep
+python3 tools/embed_image.py "$D3DX" gen/image_d3dx9.c --symbol d3dx9 --reloc keep --text keep
+python3 tools/embed_image.py "$BINK" gen/image_bink.c --symbol bink --reloc keep --text keep
+python3 tools/embed_image.py "$X3DA" gen/image_x3da.c --symbol x3da --reloc keep --text keep
 echo "gen/ is ready"

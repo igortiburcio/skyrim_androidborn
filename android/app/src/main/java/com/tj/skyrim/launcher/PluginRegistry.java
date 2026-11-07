@@ -2,15 +2,20 @@ package com.tj.skyrim.launcher;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
 /**
- * The Data Files in load order. Scans the Data folder for .esm/.esp files,
- * keeps the order and the active set the user saved, appends files that
- * appeared since, and drops files that went away. Masters come before plugins
- * (Skyrim.esm first); inside each group the order is alphabetical unless the
- * user moved something.
+ * The Data Files in load order. Scans the Data folder for .esm/.esp files and
+ * merges them with the order and active set saved by the launcher. On the
+ * first run (or after the game's files were edited elsewhere) it imports the
+ * game's own Plugins.txt/loadorder.txt instead of inventing an alphabetical
+ * order. The five official masters always stay at the top in their required
+ * order; mods keep the order the user chose.
  */
 public final class PluginRegistry {
 
@@ -21,7 +26,7 @@ public final class PluginRegistry {
         this.settings = settings;
     }
 
-    /** The plugins in the current load order; Skyrim.esm is always first. */
+    /** The plugins in the current load order. */
     List<Plugin> plugins() {
         return plugins;
     }
@@ -37,27 +42,63 @@ public final class PluginRegistry {
         String[] listing = data.list();
         if (listing == null) return;
         for (String f : listing) {
-            String low = f.toLowerCase();
+            String low = f.toLowerCase(Locale.ROOT);
             if (low.endsWith(".esm") || low.endsWith(".esp")) names.add(f);
         }
+        /* Deterministic base for plugins that are new to the launcher. */
+        names.sort(String.CASE_INSENSITIVE_ORDER);
 
+        String folder = settings.folder();
+        boolean external = PluginFiles.lastModified(folder) > settings.pluginsWrittenAt();
         List<String> order = settings.pluginOrder();
         List<String> on = settings.pluginsOn();
-        boolean firstRun = order.isEmpty();
+        if (external) {
+            List<String> fileOrder = PluginFiles.readOrder(folder);
+            List<String> fileActive = PluginFiles.readActive(folder);
+            if (!fileOrder.isEmpty()) {
+                List<String> merged = new ArrayList<>(fileOrder);
+                for (String n : order) if (!containsIgnoreCase(merged, n)) merged.add(n);
+                order = merged;
+            }
+            if (!fileActive.isEmpty()) on = fileActive;
+        }
 
-        Collections.sort(names, String.CASE_INSENSITIVE_ORDER);
-        names.sort((a, b) -> Boolean.compare(!isMaster(a), !isMaster(b)));
-        for (String n : names) plugins.add(new Plugin(n, on.contains(n) || (firstRun && isMaster(n))));
+        boolean firstRun = order.isEmpty() && !external;
+        Set<String> active = lowerSet(on);
+        Map<String, Integer> position = new HashMap<>();
+        for (int i = 0; i < order.size(); i++) {
+            position.putIfAbsent(order.get(i).toLowerCase(Locale.ROOT), i);
+        }
 
-        /* the saved order wins over the alphabetical one (stable sort) */
+        for (String n : names) {
+            boolean isOn = active.contains(n.toLowerCase(Locale.ROOT))
+                    || (firstRun && PluginFiles.isOfficialMaster(n));
+            plugins.add(new Plugin(n, isOn));
+        }
+
+        /* Official masters first in their required order, then other ESMs,
+         * then ESPs; inside a group the saved (or imported) order wins. */
         plugins.sort((a, b) -> {
-            int ia = order.indexOf(a.name), ib = order.indexOf(b.name);
-            return Integer.compare(ia == -1 ? Integer.MAX_VALUE : ia, ib == -1 ? Integer.MAX_VALUE : ib);
+            int ra = PluginFiles.rank(a.name), rb = PluginFiles.rank(b.name);
+            if (ra != rb) return Integer.compare(ra, rb);
+            Integer ia = position.get(a.name.toLowerCase(Locale.ROOT));
+            Integer ib = position.get(b.name.toLowerCase(Locale.ROOT));
+            return Integer.compare(ia == null ? Integer.MAX_VALUE : ia,
+                    ib == null ? Integer.MAX_VALUE : ib);
         });
+
+        for (Plugin p : plugins) if (p.alwaysOn()) p.on = true;
+
+        /* The game's files were newer than our last write: adopt them and
+         * write the normalized version back. */
+        if (external) save();
     }
 
-    /** Saves the order and the active set. */
+    /** Saves the order and active set, and updates the game's files at once. */
     void save() {
+        /* The folder may be unmounted or unreadable: never erase the game's
+         * plugin files just because the scan found nothing. */
+        if (plugins.isEmpty() && dataDir() == null) return;
         List<String> order = new ArrayList<>(), on = new ArrayList<>();
         for (Plugin p : plugins) {
             order.add(p.name);
@@ -65,12 +106,21 @@ public final class PluginRegistry {
         }
         settings.pluginOrder(order);
         settings.pluginsOn(on);
+        String folder = settings.folder();
+        if (folder != null) {
+            PluginFiles.write(folder, plugins);
+            settings.pluginsWrittenAt(
+                    Math.max(System.currentTimeMillis(), PluginFiles.lastModified(folder)));
+        }
     }
 
-    /** Moves a plugin one way or the other in the load order. */
+    /** Moves a plugin one way or the other inside its rank group. */
     void move(int from, int by) {
         int to = from + by;
         if (from < 0 || from >= plugins.size() || to < 0 || to >= plugins.size()) return;
+        Plugin moving = plugins.get(from);
+        if (moving.officialMaster()) return;
+        if (PluginFiles.rank(moving.name) != PluginFiles.rank(plugins.get(to).name)) return;
         plugins.add(to, plugins.remove(from));
     }
 
@@ -84,7 +134,14 @@ public final class PluginRegistry {
         return path == null ? null : Fs.findCi(new File(path), "Data");
     }
 
-    private static boolean isMaster(String name) {
-        return name.toLowerCase().endsWith(".esm");
+    private static boolean containsIgnoreCase(List<String> list, String name) {
+        for (String s : list) if (s.equalsIgnoreCase(name)) return true;
+        return false;
+    }
+
+    private static Set<String> lowerSet(List<String> names) {
+        Set<String> set = new HashSet<>();
+        for (String s : names) set.add(s.toLowerCase(Locale.ROOT));
+        return set;
     }
 }

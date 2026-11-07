@@ -1,0 +1,22 @@
+Skyrim Androidborn - Steam client module
+
+This module is a Java port of the parts of SteamKit2 that Skyrim Androidborn
+needs (CM WebSocket transport, QR authentication, logon, PICS and depot
+downloads). SteamKit2 is:
+
+    Copyright (c) SteamRE
+    https://github.com/SteamRE/SteamKit
+    Licensed under the GNU Lesser General Public License, version 2.1
+    (see LICENSE-LGPL-2.1.txt).
+
+The ported source files keep the LGPL-2.1 terms. The rest of Skyrim
+Androidborn remains MIT-licensed (see ../LICENSE).
+
+The .proto files under src/main/proto come from SteamTracking/Protobufs
+(Valve Corporation), released into the public domain (see
+LICENSE-PROTOBUFS). The Java classes under src/main/java/steam/proto were
+generated from them with protoc 25.5 and are used for interoperability with
+the Steam network.
+
+The Steam name and service belong to Valve Corporation. This module is not
+affiliated with or endorsed by Valve.
