@@ -443,8 +443,11 @@ namespace dxvk {
       t0 = dxvk::high_resolution_clock::now();
     
     VkPipeline pipeline = VK_NULL_HANDLE;
-    if (m_vkd->vkCreateGraphicsPipelines(m_vkd->device(),
-          m_pipeMgr->m_cache->handle(), 1, &info, nullptr, &pipeline) != VK_SUCCESS) {
+    m_pipeMgr->m_cache->lockShared();
+    VkResult vr = m_vkd->vkCreateGraphicsPipelines(m_vkd->device(),
+          m_pipeMgr->m_cache->handle(), 1, &info, nullptr, &pipeline);
+    m_pipeMgr->m_cache->unlockShared();
+    if (vr != VK_SUCCESS) {
       Logger::err("DxvkGraphicsPipeline: Failed to compile pipeline");
       this->logPipelineState(LogLevel::Error, state);
       return VK_NULL_HANDLE;

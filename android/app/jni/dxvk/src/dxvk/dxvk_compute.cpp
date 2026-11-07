@@ -118,8 +118,11 @@ namespace dxvk {
       t0 = dxvk::high_resolution_clock::now();
     
     VkPipeline pipeline = VK_NULL_HANDLE;
-    if (m_vkd->vkCreateComputePipelines(m_vkd->device(),
-          m_pipeMgr->m_cache->handle(), 1, &info, nullptr, &pipeline) != VK_SUCCESS) {
+    m_pipeMgr->m_cache->lockShared();
+    VkResult vr = m_vkd->vkCreateComputePipelines(m_vkd->device(),
+          m_pipeMgr->m_cache->handle(), 1, &info, nullptr, &pipeline);
+    m_pipeMgr->m_cache->unlockShared();
+    if (vr != VK_SUCCESS) {
       Logger::err("DxvkComputePipeline: Failed to compile pipeline");
       Logger::err(str::format("  cs  : ", m_shaders.cs->debugName()));
       return VK_NULL_HANDLE;

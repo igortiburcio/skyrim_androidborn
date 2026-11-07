@@ -3,6 +3,8 @@
 #include <atomic>
 #include <condition_variable>
 #include <fstream>
+#include <mutex>
+#include <shared_mutex>
 #include <vector>
 
 #include "dxvk_include.h"
@@ -42,6 +44,21 @@ namespace dxvk {
       return m_cache;
     }
 
+    /**
+     * \brief Locks the cache for pipeline creation
+     *
+     * vkCreateGraphicsPipelines and vkCreateComputePipelines are internally
+     * synchronized with each other for the same cache, so they use a shared
+     * lock. vkGetPipelineCacheData requires host access to the cache to be
+     * externally synchronized, so the periodic save takes the exclusive
+     * lock. Without this, the save thread could read the cache while the
+     * render/compiler threads were updating it, which is undefined
+     * behaviour and produced transient wrong pipelines (a flat blue weapon
+     * silhouette was one visible symptom).
+     */
+    void lockShared()   { m_cacheLock.lock_shared(); }
+    void unlockShared() { m_cacheLock.unlock_shared(); }
+
   private:
 
     Rc<vk::DeviceFn>              m_vkd;
@@ -56,6 +73,7 @@ namespace dxvk {
 
     dxvk::mutex                   m_mutex;
     dxvk::condition_variable      m_cond;
+    std::shared_mutex             m_cacheLock;
     std::atomic<bool>             m_stop  = { false };
     dxvk::thread                  m_thread;
 
