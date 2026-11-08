@@ -46,6 +46,9 @@ if ! grep -q "\"$V\"" "$ROOT/android/app/build.gradle"; then
     echo "warning: versionName in android/app/build.gradle does not look like $V" >&2
 fi
 
+echo "running tests"
+"$ROOT/tools/test.sh"
+
 APK="$ROOT/Skyrim-Androidborn-$V.apk"
 "$ROOT/tools/build_release.sh" "$APK"
 

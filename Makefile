@@ -40,4 +40,8 @@ build/rt/%.o: runtime/%.cpp runtime/*.h
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 gen: $(GEN_OBJ)
-.PHONY: gen
+
+test:
+	tools/test.sh
+
+.PHONY: gen test

@@ -19,10 +19,10 @@ import java.util.Set;
  */
 public final class PluginRegistry {
 
-    private final LauncherSettings settings;
+    private final PluginSettings settings;
     private final List<Plugin> plugins = new ArrayList<>();
 
-    public PluginRegistry(LauncherSettings settings) {
+    public PluginRegistry(PluginSettings settings) {
         this.settings = settings;
     }
 

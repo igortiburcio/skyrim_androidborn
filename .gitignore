@@ -26,6 +26,7 @@ android/app/.cxx/
 android/local.properties
 steam/build/
 tools/__pycache__/
+tests/python/__pycache__/
 desktop/build/
 .vscode/
 

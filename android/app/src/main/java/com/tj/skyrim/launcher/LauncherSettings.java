@@ -10,7 +10,7 @@ import java.util.List;
  * selected options, the load order and active plugins, and the selected GPU
  * driver.
  */
-public final class LauncherSettings {
+public final class LauncherSettings implements PluginSettings {
 
     private static final String PREFS = "launcher";
 
