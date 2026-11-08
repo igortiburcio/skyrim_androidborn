@@ -1,0 +1,5 @@
+# Python dependencies for tests/python (the lifter tests).
+capstone>=5
+pefile>=2023.2.7
+# Only needed to run tools/difftest.py, not the unit tests:
+# unicorn

@@ -13,9 +13,8 @@ import struct
 import subprocess
 import sys
 
-EXE, FUNCS, WORK = sys.argv[1:4]
-PER_SHAPE = int(sys.argv[4]) if len(sys.argv) > 4 else 3
-sys.argv = [sys.argv[0], EXE, FUNCS, WORK]
+EXE, FUNCS, WORK = None, None, None
+PER_SHAPE = 3
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lift  # noqa: E402
 from capstone import x86  # noqa: E402
@@ -382,6 +381,16 @@ def compare(a, b, t):
 
 
 def main():
+    global EXE, FUNCS, WORK, PER_SHAPE
+    args = sys.argv[1:]
+    if len(args) < 3:
+        print("usage: difftest.py EXE functions.json workdir [max_per_shape]",
+              file=sys.stderr)
+        return 2
+    EXE, FUNCS, WORK = args[:3]
+    PER_SHAPE = int(args[3]) if len(args) > 3 else 3
+    lift.init(EXE, FUNCS, WORK)
+
     os.makedirs(WORK, exist_ok=True)
     shapes = harvest()
     tests = make_tests(shapes)
@@ -437,4 +446,5 @@ def main():
         print("harness exit", res.returncode, res.stderr[-500:])
 
 
-main()
+if __name__ == "__main__":
+    raise SystemExit(main())

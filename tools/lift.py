@@ -17,19 +17,36 @@ from capstone import x86
 
 import peimg
 
-EXE, FUNCS, OUT = sys.argv[1:4]
-MOD = sys.argv[4] if len(sys.argv) > 4 else "exe"
-NEW_BASE = int(sys.argv[5], 16) if len(sys.argv) > 5 else None
-FILES = int(os.environ.get("LIFT_FILES", 64 if MOD == "exe" else 24))
-
-pe, BASE, img = peimg.load(EXE, NEW_BASE)
-img = bytes(img)
+# Filled in by init(); importing the module must not read argv or a game file,
+# so tests/python can exercise the pure helpers.
+EXE, FUNCS, OUT = None, None, None
+MOD = "exe"
+NEW_BASE = None
+FILES = int(os.environ.get("LIFT_FILES", 64))
+BASE = 0
+img = b""
+pe = None
+data = {}
+iat = {}
+jump_tables = {}
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 md.detail = True
 
-data = json.load(open(FUNCS))
-iat = {int(k, 16): v for k, v in data["iat"].items()}
-jump_tables = {int(k, 16): [int(t, 16) for t in v] for k, v in data["jump_tables"].items()}
+
+def init(exe, funcs, out, mod=None, new_base=None, files=None):
+    """Loads the executable, function table and output directory."""
+    global EXE, FUNCS, OUT, MOD, NEW_BASE, FILES, pe, BASE, img, data, iat, jump_tables
+    EXE, FUNCS, OUT = exe, funcs, out
+    MOD = mod or "exe"
+    NEW_BASE = new_base
+    FILES = files if files is not None else int(
+        os.environ.get("LIFT_FILES", 64 if MOD == "exe" else 24))
+    pe, BASE, loaded = peimg.load(EXE, NEW_BASE)
+    img = bytes(loaded)
+    data = json.load(open(FUNCS))
+    iat = {int(k, 16): v for k, v in data["iat"].items()}
+    jump_tables = {int(k, 16): [int(t, 16) for t in v]
+                   for k, v in data["jump_tables"].items()}
 
 JUNK = {
     "in", "out", "insb", "insd", "insw", "outsb", "outsd", "outsw", "hlt", "retf", "iretd",
@@ -39,19 +56,28 @@ JUNK = {
 }
 
 
+def decode_bytes(decoder, image, base, a, b):
+    """Instructions in image[base..] between guest addresses a and b."""
+    return list(decoder.disasm(image[a - base:b - base], a))
+
+
 def decode_block(a, b):
-    return list(md.disasm(img[a - BASE:b - BASE], a))
+    return decode_bytes(md, img, BASE, a, b)
+
+
+def import_name(table, image, base, t):
+    """Import name if `t` is the IAT slot itself or a `jmp [iat]` stub."""
+    if t in table:
+        return table[t]
+    if not (base <= t < base + len(image) - 6):
+        return ""
+    if image[t - base] == 0xFF and image[t - base + 1] == 0x25:
+        return table.get(int.from_bytes(image[t - base + 2:t - base + 6], "little"), "")
+    return ""
 
 
 def import_via(t):
-    """Import name if `t` is the IAT slot itself or a `jmp [iat]` stub."""
-    if t in iat:
-        return iat[t]
-    if not (BASE <= t < BASE + len(img) - 6):
-        return ""
-    if img[t - BASE] == 0xFF and img[t - BASE + 1] == 0x25:
-        return iat.get(int.from_bytes(img[t - BASE + 2:t - BASE + 6], "little"), "")
-    return ""
+    return import_name(iat, img, BASE, t)
 
 
 REG32 = ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"]
@@ -1214,14 +1240,24 @@ class Lifter:
 
 def write_if_changed(path, text):
     try:
-        if open(path).read() == text:
-            return
+        with open(path) as f:
+            if f.read() == text:
+                return
     except OSError:
         pass
-    open(path, "w").write(text)
+    with open(path, "w") as f:
+        f.write(text)
 
 
 def main():
+    args = sys.argv[1:]
+    if len(args) < 3:
+        print("usage: lift.py EXE functions.json outdir [mod] [new_base]", file=sys.stderr)
+        return 2
+    init(args[0], args[1], args[2],
+         args[3] if len(args) > 3 else "exe",
+         int(args[4], 16) if len(args) > 4 else None)
+
     os.makedirs(OUT, exist_ok=True)
     funcs = {int(k, 16): [tuple(b) for b in v] for k, v in data["functions"].items()}
     # Pass 1: lift; drop functions that contain junk (data decoded as code).
