@@ -10,6 +10,7 @@
 // Sync" item in Options > Video Settings becomes "Touch Controls" and shows
 // or hides the overlay (vsync itself is then always on, see d3d9_bridge.cpp).
 #include "d3d9_bridge.h"
+#include "touch_math.h"
 #include <SDL2/SDL.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -22,36 +23,15 @@ extern "C" void input_set_virtual(uint16_t buttons, int16_t lx, int16_t ly, int1
                                   uint8_t lt, uint8_t rt);
 
 namespace {
-// Layout in units of screen height, anchored to a corner (ax, ay in {0,1}).
-// label is drawn inside the disc (null: a symbol is drawn instead).
-struct Button {
-    const char *name; uint16_t bit; float ax, ay, dx, dy, r; uint32_t color; uint8_t trig;
-    const char *label; uint32_t text;
-};
-const Button k_buttons[] = {
-    {"A", 0x1000, 1, 1, -0.20f, -0.14f, 0.075f, 0xFF40C040, 0, "A", 0xF0FFFFFF},
-    {"B", 0x2000, 1, 1, -0.08f, -0.27f, 0.075f, 0xFFE04040, 0, "B", 0xF0FFFFFF},
-    {"X", 0x4000, 1, 1, -0.32f, -0.27f, 0.075f, 0xFF4080F0, 0, "X", 0xF0FFFFFF},
-    {"Y", 0x8000, 1, 1, -0.20f, -0.40f, 0.075f, 0xFFF0D040, 0, "Y", 0xF0FFFFFF},
-    {"LB", 0x0100, 0, 0, 0.12f, 0.30f, 0.06f, 0xFFB0B0B0, 0, "LB", 0xF0FFFFFF},
-    {"RB", 0x0200, 1, 0, -0.12f, 0.30f, 0.06f, 0xFFB0B0B0, 0, "RB", 0xF0FFFFFF},
-    {"LT", 0, 0, 0, 0.12f, 0.42f, 0.06f, 0xFFB0B0B0, 1, "LT", 0xF0FFFFFF},
-    {"RT", 0, 1, 0, -0.12f, 0.42f, 0.06f, 0xFFB0B0B0, 2, "RT", 0xF0FFFFFF},
-    {"Back", 0x0020, 0, 0, 0.36f, 0.07f, 0.045f, 0xFFD0D0D0, 0, nullptr, 0xFF101010},
-    {"Start", 0x0010, 1, 0, -0.36f, 0.07f, 0.045f, 0xFFFFFFFF, 0, nullptr, 0xFF101010},
-};
-const int NB = sizeof k_buttons / sizeof k_buttons[0];
-const float STICK_X = 0.24f, STICK_Y = -0.26f, STICK_R = 0.17f; // from bottom-left
-const float LOOK_R = 0.15f;                                    // fixed stick base radius
-const float LOOK_X = 0.62f, LOOK_Y = 0.70f;                    // fixed stick base centre
-// Drag camera: pending is in stick units; a drag adds travel * LOOK_GAIN and
-// each frame emits up to a full stick and keeps LOOK_DECAY of the rest, so the
-// camera stops shortly after the finger does. The game's own deadzone is
-// compensated at the output, otherwise short drags would do nothing.
-const float LOOK_GAIN = 60.0f;        // stick units per screen height of travel
-const float LOOK_DECAY = 0.65f;       // pending kept each frame
-const float LOOK_DEADZONE = 0.27f;    // the game's right-stick deadzone, cancelled at the output
-const float LOOK_MIN = 0.02f;         // below this the camera is still
+// The layout table and the stick/camera math live in touch_math.h so the host
+// tests can exercise them without SDL or D3D.
+using touch::Button;
+const Button *const k_buttons = touch::kButtons;
+const int NB = touch::kButtonCount;
+const float STICK_X = touch::kStickX, STICK_Y = touch::kStickY, STICK_R = touch::kStickR;
+const float LOOK_R = touch::kLookR;
+const float LOOK_X = touch::kLookX, LOOK_Y = touch::kLookY;
+const float LOOK_GAIN = touch::kLookGain;
 // Keyboard button, top-left: shows or hides the phone's keyboard. It stays
 // on screen when the touch controls are switched off.
 const Button k_kbd = {"Keyboard", 0, 0, 0, 0.08f, 0.07f, 0.045f, 0xFFE0E0E0, 0, nullptr, 0};
@@ -113,26 +93,7 @@ bool enabled() {
     return on;
 }
 
-// Centre of a button in normalised screen coordinates (0..1 both axes).
-void button_pos(const Button &b, float *x, float *y) {
-    *x = b.ax + b.dx / g_aspect;
-    *y = b.ay + b.dy;
-}
-
-void stick_pos(float *x, float *y) {
-    *x = STICK_X / g_aspect;
-    *y = 1 + STICK_Y;
-}
-
-int hit_button(float x, float y) {
-    for (int i = 0; i < NB; i++) {
-        float bx, by;
-        button_pos(k_buttons[i], &bx, &by);
-        float dx = (x - bx) * g_aspect, dy = y - by, r = k_buttons[i].r * 1.3f;
-        if (dx * dx + dy * dy < r * r) return i;
-    }
-    return -1;
-}
+// Centre of a button, stick base and hit testing are in touch_math.h.
 
 void push_input() {
     input_set_virtual(g_buttons, (int16_t)(g_stick_x * 32767), (int16_t)(-g_stick_y * 32767),
@@ -148,24 +109,16 @@ void update() {
     for (auto &f : g_fingers) {
         if (!f.used) continue;
         if (f.role == F_MOVE) {
-            float cx, cy;
-            stick_pos(&cx, &cy);
-            sx = (f.x - cx) * g_aspect / STICK_R;
-            sy = (f.y - cy) / STICK_R;
-            float l = std::sqrt(sx * sx + sy * sy);
-            if (l > 1) { sx /= l; sy /= l; }
+            touch::move_stick(f.x, f.y, g_aspect, &sx, &sy);
         } else if (f.role == F_LOOK) {
             if (g_camera_drag || look_used) continue;
             // fixed-base analog stick, the old camera control
             look_used = true;
             g_look_active = true;
-            rx = (f.x - LOOK_X) * g_aspect / LOOK_R;
-            ry = -(f.y - LOOK_Y) / LOOK_R;  /* drag up = +1, the game's forward */
-            float l = std::sqrt(rx * rx + ry * ry);
-            if (l > 1) { rx /= l; ry /= l; }
+            touch::look_stick(f.x, f.y, g_aspect, &rx, &ry);
         } else if (f.role == F_BUTTON) {
             // a finger may slide between buttons
-            int h = hit_button(f.x, f.y);
+            int h = touch::hit_button(f.x, f.y, g_aspect);
             if (h >= 0) f.button = h;
             if (f.button >= 0) {
                 const Button &btn = k_buttons[f.button];
@@ -193,22 +146,8 @@ void update() {
 // lifts instead of spinning while it rests.
 void camera_frame() {
     if (!g_camera_drag) return;
-    float rx = g_pending_x, ry = g_pending_y;
-    rx = rx > 1 ? 1 : rx < -1 ? -1 : rx;
-    ry = ry > 1 ? 1 : ry < -1 ? -1 : ry;
-    g_pending_x = (g_pending_x - rx) * LOOK_DECAY;
-    g_pending_y = (g_pending_y - ry) * LOOK_DECAY;
-    if (std::fabs(g_pending_x) < 0.01f) g_pending_x = 0;
-    if (std::fabs(g_pending_y) < 0.01f) g_pending_y = 0;
-    float l = std::sqrt(rx * rx + ry * ry);
-    if (l > LOOK_MIN) {
-        // the game subtracts its own deadzone: add it back so small drags aim
-        float m = LOOK_DEADZONE + (1 - LOOK_DEADZONE) * (l > 1 ? 1 : l);
-        rx = rx / l * m;
-        ry = ry / l * m;
-    } else {
-        rx = ry = 0;
-    }
+    float rx, ry;
+    touch::camera_step(&g_pending_x, &g_pending_y, &rx, &ry);
     if (rx == g_stick_rx && ry == g_stick_ry) return;  // stopped: nothing to send
     g_stick_rx = rx;
     g_stick_ry = ry;
@@ -260,7 +199,7 @@ extern "C" void touch_handle_event(const SDL_Event *e) {
     for (auto &g : g_fingers) if (g.used && g.id == id) f = &g;
     if (down && !f) {
         float kx, ky;
-        button_pos(k_kbd, &kx, &ky);
+        touch::button_pos(k_kbd, g_aspect, &kx, &ky);
         float dx = (x - kx) * g_aspect, dy = y - ky, r = k_kbd.r * 1.4f;
         bool kbd = dx * dx + dy * dy < r * r;
         if (!kbd && !on) return;
@@ -276,14 +215,14 @@ extern "C" void touch_handle_event(const SDL_Event *e) {
             platform_text_input(1);
             return;
         }
-        int h = hit_button(x, y);
+        int h = touch::hit_button(x, y, g_aspect);
         if (h >= 0) {
             f->role = F_BUTTON;
             f->button = h;
         } else if (g_camera_drag) {
             // movement only from the visible stick; the rest drags the camera
             float cx, cy;
-            stick_pos(&cx, &cy);
+            touch::stick_pos(g_aspect, &cx, &cy);
             float sdx = (x - cx) * g_aspect, sdy = y - cy, sr = STICK_R * 1.15f;
             f->role = sdx * sdx + sdy * sdy < sr * sr ? F_MOVE : F_LOOK;
         } else {
@@ -484,14 +423,14 @@ void touch_draw(IDirect3DDevice9 *d) {
     // they are crisp rectangles instead of soft dots
     {
         float kx, ky, r = k_kbd.r;
-        button_pos(k_kbd, &kx, &ky);
+        touch::button_pos(k_kbd, g_aspect, &kx, &ky);
         uint32_t a = platform_text_input(-1) ? 0xF0 : 0x90;
         quad(v + 6 * n++, kx, ky, r, w, h, (k_kbd.color & 0xFFFFFF) | a << 24);
     }
     // the HUD (crosshair included) is on the second screen: a dot instead
     if (hud_screen_crosshair()) quad(v + 6 * n++, 0.5f, 0.5f, 0.007f, w, h, 0xD0FFFFFF);
     float sx, sy;
-    stick_pos(&sx, &sy);
+    touch::stick_pos(g_aspect, &sx, &sy);
     if (on) {
         quad(v + 6 * n++, sx, sy, STICK_R, w, h, 0x90FFFFFF);
         quad(v + 6 * n++, sx + g_stick_x * STICK_R / g_aspect,
@@ -505,7 +444,7 @@ void touch_draw(IDirect3DDevice9 *d) {
     }
     for (int i = 0; on && i < NB; i++) {
         float bx, by;
-        button_pos(k_buttons[i], &bx, &by);
+        touch::button_pos(k_buttons[i], g_aspect, &bx, &by);
         uint32_t col = k_buttons[i].color;
         uint32_t a;
         if (k_buttons[i].trig == 1) a = g_lt ? 0xF0 : 0x90;
@@ -521,7 +460,7 @@ void touch_draw(IDirect3DDevice9 *d) {
         int tn = 0;
         {  // keyboard button: dark body with light keys and a space bar
             float kx, ky, r = k_kbd.r;
-            button_pos(k_kbd, &kx, &ky);
+            touch::button_pos(k_kbd, g_aspect, &kx, &ky);
             float x = kx * w, y = ky * h, s = r * h;
             bool active = platform_text_input(-1) != 0;
             uint32_t body = active ? 0xD8303030 : 0xB8303030;
@@ -539,7 +478,7 @@ void touch_draw(IDirect3DDevice9 *d) {
         }
         for (int i = 0; on && i < NB; i++) {
             float bx, by;
-            button_pos(k_buttons[i], &bx, &by);
+            touch::button_pos(k_buttons[i], g_aspect, &bx, &by);
             uint32_t col = k_buttons[i].text;
             if (k_buttons[i].label) {
                 int len = (int)strlen(k_buttons[i].label);

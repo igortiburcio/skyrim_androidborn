@@ -1,8 +1,8 @@
 # The game: host runtime + recompiled code from port/runtime and port/gen.
 get_filename_component(PORT ${CMAKE_CURRENT_SOURCE_DIR}/../../../.. ABSOLUTE)
 file(GLOB GEN_SRC ${PORT}/gen/*.c)
-file(GLOB RT_SRC ${PORT}/runtime/*.c)
-file(GLOB RT_CXX ${PORT}/runtime/*.cpp)
+file(GLOB RT_SRC CONFIGURE_DEPENDS ${PORT}/runtime/*.c)
+file(GLOB RT_CXX CONFIGURE_DEPENDS ${PORT}/runtime/*.cpp)
 
 add_library(lbgen OBJECT ${GEN_SRC})
 set_property(TARGET lbgen PROPERTY JOB_POOL_COMPILE gen)

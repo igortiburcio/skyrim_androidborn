@@ -2,6 +2,7 @@
  * INI files (Get/WritePrivateProfile*), file times, misc kernel32/user32. */
 #define _GNU_SOURCE
 #include "rt.h"
+#include "ini.h"
 #include <ctype.h>
 #include <string.h>
 #include <strings.h>
@@ -14,63 +15,8 @@
 /* ===================== INI files =====================
  * Parsed files are cached by host path and reloaded when their mtime or size
  * changes; Skyrim reads every setting with a separate call. */
-typedef struct { char *sec, *key, *val; } IniEnt;
-typedef struct IniFile {
-    char path[1024];
-    time_t mtime;
-    off_t size;
-    IniEnt *e;
-    int n, cap;
-    struct IniFile *next;
-} IniFile;
 static IniFile *g_inis;
 static pthread_mutex_t g_ini_lock = PTHREAD_MUTEX_INITIALIZER;
-
-static char *trim(char *s) {
-    while (*s == ' ' || *s == '\t') s++;
-    char *e = s + strlen(s);
-    while (e > s && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\r' || e[-1] == '\n')) *--e = 0;
-    return s;
-}
-
-static void ini_free(IniFile *f) {
-    for (int i = 0; i < f->n; i++) { free(f->e[i].sec); free(f->e[i].key); free(f->e[i].val); }
-    free(f->e);
-    f->e = NULL;
-    f->n = f->cap = 0;
-}
-
-static void ini_add(IniFile *f, const char *sec, const char *key, const char *val) {
-    if (f->n == f->cap) {
-        f->cap = f->cap ? f->cap * 2 : 64;
-        f->e = realloc(f->e, sizeof(IniEnt) * f->cap);
-    }
-    f->e[f->n++] = (IniEnt){strdup(sec), key ? strdup(key) : NULL, val ? strdup(val) : NULL};
-}
-
-/* Section header entries have key == NULL, so empty sections are kept. */
-static void ini_parse(IniFile *f) {
-    ini_free(f);
-    FILE *fp = fopen(f->path, "rb");
-    if (!fp) return;
-    char line[4096], sec[256] = "";
-    while (fgets(line, sizeof line, fp)) {
-        char *s = trim(line);
-        if (!*s || *s == ';' || *s == '#') continue;
-        if (*s == '[') {
-            char *e = strchr(s, ']');
-            if (e) *e = 0;
-            snprintf(sec, sizeof sec, "%s", trim(s + 1));
-            ini_add(f, sec, NULL, NULL);
-            continue;
-        }
-        char *eq = strchr(s, '=');
-        if (!eq) continue;
-        *eq = 0;
-        ini_add(f, sec, trim(s), trim(eq + 1));
-    }
-    fclose(fp);
-}
 
 static IniFile *ini_get(const char *winpath) {
     char host[1024];
@@ -101,12 +47,6 @@ static IniFile *ini_get(const char *winpath) {
         ini_parse(f);
     }
     return f;
-}
-
-static const char *ini_find(IniFile *f, const char *sec, const char *key) {
-    for (int i = 0; i < f->n; i++)
-        if (f->e[i].key && !strcasecmp(f->e[i].sec, sec) && !strcasecmp(f->e[i].key, key)) return f->e[i].val;
-    return NULL;
 }
 
 /* Copies a double-NUL list or a string into a guest buffer, Windows style:

@@ -25,6 +25,7 @@
 // two images are laid out on the second display's dxvk swap chain (see dxvk's
 // wsi_native_surface.h).
 #include "d3d9_bridge.h"
+#include "hud_layout.h"
 #include <pthread.h>
 #include <initializer_list>
 #include <SDL2/SDL.h>
@@ -334,27 +335,12 @@ void hud_render(CPU *c) {
 // Second screen layout: the HUD image and the favourites list (the left part
 // of the favourites menu) side by side or one above the other, whichever
 // gives the HUD more room.
-const float FAV_CROP = 0.42f;  // share of the menu's width that holds the list
 void layout(RECT *hud, RECT *fav, RECT *fav_src) {
-    float W = (float)g_win_w, H = (float)g_win_h, a = (float)g_rt_w / g_rt_h, fa = a * FAV_CROP;
-    // stacked: HUD on top at full width, list below; side by side: list left
-    float hs_w = W, hs_h = W / a;
-    if (hs_h > H * 0.75f) { hs_h = H * 0.75f; hs_w = hs_h * a; }
-    float rem_h = H - hs_h;
-    float s_w = W / (a + fa), s_h = s_w;  // side by side: common height h, widths a*h and fa*h
-    if (s_h > H) s_h = H;
-    float side_hud_w = s_h * a;
-    if (side_hud_w > hs_w) {
-        float x0 = (W - s_h * (a + fa)) / 2, y0 = (H - s_h) / 2;
-        *fav = {(LONG)x0, (LONG)y0, (LONG)(x0 + s_h * fa), (LONG)(y0 + s_h)};
-        *hud = {fav->right, (LONG)y0, (LONG)(fav->right + side_hud_w), (LONG)(y0 + s_h)};
-    } else {
-        *hud = {(LONG)((W - hs_w) / 2), 0, (LONG)((W + hs_w) / 2), (LONG)hs_h};
-        float fh = rem_h, fw = fh * fa;
-        if (fw > W) { fw = W; fh = fw / fa; }
-        *fav = {(LONG)((W - fw) / 2), (LONG)hs_h, (LONG)((W + fw) / 2), (LONG)(hs_h + fh)};
-    }
-    *fav_src = {0, 0, (LONG)(g_rt_w * FAV_CROP), (LONG)g_rt_h};
+    hud::Rect h, f, src;
+    hud::layout((int)g_win_w, (int)g_win_h, (int)g_rt_w, (int)g_rt_h, &h, &f, &src);
+    *hud = {(LONG)h.left, (LONG)h.top, (LONG)h.right, (LONG)h.bottom};
+    *fav = {(LONG)f.left, (LONG)f.top, (LONG)f.right, (LONG)f.bottom};
+    *fav_src = {(LONG)src.left, (LONG)src.top, (LONG)src.right, (LONG)src.bottom};
 }
 } // namespace
 
