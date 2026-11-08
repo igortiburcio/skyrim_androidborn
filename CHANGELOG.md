@@ -11,6 +11,22 @@ Skyrim Androidborn is a fork of
 [ttom795/Skyrim_Android](https://github.com/ttom795/Skyrim_Android), developed
 independently.
 
+## 0.2.2 — 2026-11-08
+
+Test suites and the release gate.
+
+### Tests
+- [Automated tests for launcher settings and Steam downloads — broken settings and corrupted downloads are caught before a release]
+  The launcher and Steam client suites run on the JVM, and the release script
+  refuses to publish when one of them fails.
+- [Native tests for touch controls, textures and INI settings — control and graphics regressions are caught before a release]
+  Stick clamping, DXT decoding, the second-screen layout and the x87 helpers
+  are checked on the host, without a phone or the game files.
+
+### Notes
+Tested on a Retroid Pocket G2 (Adreno A22, Android 15): launcher, touch
+overlay, A button, drag camera, save load, 30 fps and audio.
+
 ## 0.2.1 — 2026-11-07
 
 Blue weapon glitch and new-object flicker.
