@@ -66,11 +66,12 @@ comments, not in the changelog.
 2. Add a `## X.Y.Z — YYYY-MM-DD` section to `CHANGELOG.md` with
    `[Technical change — Positive impact]` bullets.
 3. Update the `Current version` line in `README.md`.
-4. Run `tools/release.sh X.Y.Z` (builds the release APK, checks the notes and
-   creates the GitHub Release with the APK attached).
-5. Install the release APK over the previous build and check the launcher, a
+4. Run `tools/test.sh` and make sure every suite passes.
+5. Run `tools/release.sh X.Y.Z` (runs the tests again, builds the release APK,
+   checks the notes and creates the GitHub Release with the APK attached).
+6. Install the release APK over the previous build and check the launcher, a
    save load, 30 fps, audio and fullscreen.
-6. Only then announce the release.
+7. Only then announce the release.
 
 ## 4. Our source is the source of truth
 

@@ -5,9 +5,34 @@ V: Skyrim* (not Special Edition). It runs on arm64 Android devices with
 Vulkan 1.1.
 
 Tested on a **Retroid Pocket G2** (Adreno A22, Android 15). Also tested on a
-**Xiaomi 15T** (Mali-G720, Android 15) with the PanVK driver.
+**Xiaomi 15T** (Mali-G720, Android 15) with the PanVK driver. Mali and
+Immortalis devices need that driver; see the first section.
 
 Current version: **0.2.1** — see [CHANGELOG.md](CHANGELOG.md).
+
+## Mali and Immortalis GPUs: install the PanVK driver first
+
+Mali and Immortalis GPUs (for example Mali-G57, G68, G7xx, G6xx,
+Immortalis-G720 and G925) need a custom Vulkan driver. The stock Mali driver
+crashes inside its shader compiler while Skyrim builds its shaders, so the game
+closes shortly after the Bethesda logo. This is a driver bug, not a game
+setting.
+
+1. On the device, download the newest `mali-panvk-*.zip` from
+   [JimVulkan/mali-panvk releases](https://github.com/JimVulkan/mali-panvk/releases).
+   Tested with `mali-panvk-27.0.0-devel-r10.zip`; Android 12 or newer, 64-bit.
+2. Open Skyrim Androidborn and tap **Settings**.
+3. Open the **GPU Driver** tab.
+4. Tap **Choose driver zip** and pick the zip you downloaded.
+5. The launcher installs it and selects it. If an older PanVK entry is already
+   in the list, select it and tap **Remove selected driver** first.
+6. Go back and tap **Play**. The driver applies on the next launch.
+
+The first launch compiles shaders and can take a little longer. If the game
+still closes after the Bethesda logo, open an issue and attach `port/log.txt`
+and `port/last_exit.txt`.
+
+Adreno GPUs (Snapdragon) use the system driver; this step is not needed.
 
 ## Screenshots
 
@@ -20,6 +45,7 @@ Current version: **0.2.1** — see [CHANGELOG.md](CHANGELOG.md).
 ## What you need
 
 - arm64 Android 9 or newer with Vulkan 1.1.
+- On a Mali or Immortalis GPU, the PanVK driver zip from the first section.
 - Around 3 GB of RAM and 10 GB of free storage.
 - A Steam account that owns the 2011 game, or a `Data` folder from your own
   PC copy. The 2011 original only; Special Edition does not work.
@@ -123,12 +149,9 @@ launcher open while the data downloads.
 
 ### Mali GPUs
 
-The stock Mali Vulkan driver crashes while Skyrim compiles its shaders, so the
-game closes shortly after Play. Install a PanVK driver zip in
-**Settings > GPU Driver** and select it before playing. Tested with
-`mali-panvk-27.0.0-devel-r10` (`libvulkan_panfrost.so`); newer PanVK builds
-from the emulator community should also work. The launcher installs the same
-driver zips the emulators use.
+See [Mali and Immortalis GPUs: install the PanVK driver first](#mali-and-immortalis-gpus-install-the-panvk-driver-first).
+The stock Mali driver crashes in its shader compiler; PanVK avoids it. The
+launcher installs the same driver zips the emulators use.
 
 ## Technical details
 
@@ -235,7 +258,24 @@ libavcodec-dev libavutil-dev`, run `desktop/build.sh` and then
 `build/lb GAME_DIR SAVE_DIR`. The Makefile takes `FFMPEG` and `FFMPEG_LIB`
 when the FFmpeg 6 prefix is not `/usr`.
 
-#### 3. Release
+#### 3. Tests
+
+```sh
+tools/test.sh
+```
+
+Runs the launcher unit tests (`:app`) and the Steam client tests (`:steam`) on
+the JVM; no device is needed. It also builds the native C/C++ tests in
+`tests/native` (touch math, DXT decoding, INI parsing and the x87 helpers) with
+`zig`; install it with `mise install zig`. The lifter tests in `tests/python`
+run when `capstone` and `pefile` are available (`python3 -m pip install -r
+tests/python/requirements.txt`, preferably in a venv); without them the suite
+prints a skip message. `tools/release.sh` runs the same suites before it builds
+an APK. The tests that touch the network or a real appinfo dump are opt-in:
+`STEAM_SMOKE=1` for `QrSmokeTest`, `APPINFO_BIN=/path/appinfo.bin` for
+`VdfTest`.
+
+#### 4. Release
 
 ```sh
 tools/release.sh 0.2.0
