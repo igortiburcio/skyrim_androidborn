@@ -30,6 +30,21 @@ public final class GameConfigWriter {
     private static final int[] ANISO_VALUES = {1, 2, 4, 8, 16};
     private static final int[] TEXQ_SKIP = {2, 1, 0};                 // iTexMipMapSkip
     private static final int[] SHADOW_RESOLUTION = {512, 1024, 2048, 4096};
+    /* Shadow resolution keeps the game's preset sizes. The distance is raised
+     * above the preset values on purpose: the edge of the shadow map is a
+     * hard line that crosses the ground close to the player, so it looks like
+     * the shadow moves and changes shape when the camera turns. Pushing the
+     * edge further out keeps the visible ground inside the map. Bias and blur
+     * come from the game's own presets. The preset INIs are not part of a
+     * Data-only install, so these have to be written here. */
+    private static final String[] SHADOW_DISTANCE =
+            {"4000.0000", "5000.0000", "6000.0000", "8000.0000"};
+    private static final String[] SHADOW_BIAS =
+            {"0.5000", "0.3000", "0.2500", "0.1500"};
+    /* Vanilla shadows are meant to be blurred: 0 shows the raw shadow-map
+     * texels and their striping, especially at 512. */
+    private static final String[] SHADOW_BLUR = {"3", "3", "3", "3"};
+    private static final String INTERIOR_SHADOW_DISTANCE = "3000.0000";
     private static final int[] DECAL_COUNT = {0, 100, 250, 1000};
     private static final String[] FADE_MULT = {"2.5", "4.5", "6.5", "9.0"};
     private static final String[] LANG_CODES =
@@ -85,15 +100,32 @@ public final class GameConfigWriter {
         ini.put("Display", "iShadowMapResolution", Integer.toString(shadows));
         ini.put("Display", "iShadowMapResolutionPrimary", Integer.toString(shadows));
         ini.put("Display", "iShadowMapResolutionSecondary", Integer.toString(Math.max(512, shadows / 2)));
+        /* Distance, bias and blur belong with the resolution. Without these
+         * keys the game falls back to its compiled defaults (a short distance
+         * and a high bias), so the shadow-map edge crosses the ground near the
+         * player and shadows detach from their casters. */
+        ini.put("Display", "fShadowDistance", SHADOW_DISTANCE[c.shadowDetail]);
+        ini.put("Display", "fInteriorShadowDistance", INTERIOR_SHADOW_DISTANCE);
+        ini.put("Display", "fShadowBiasScale", SHADOW_BIAS[c.shadowDetail]);
+        ini.put("Display", "iBlurDeferredShadowMask", SHADOW_BLUR[c.shadowDetail]);
+        ini.put("Display", "iShadowFilter", "3");
+        ini.put("Display", "iShadowMode", "3");
+        ini.put("Display", "iShadowMaskQuarter", "4");
         /* Disabling shadows must turn the passes off too: only shrinking the
          * map leaves the deferred shadow pass running every frame, which made
          * the option slower than shadows on. Keep the preset's valid map
-         * size/distances and disable the passes explicitly. */
+         * size/distances and disable the passes explicitly.
+         * Deferred shadows are off: they add a screen-space mask pass and were
+         * part of the profile tested on the device. Land and grass shadows
+         * depend on that path, so they are off too. */
         ini.put("Display", "bDrawShadows", shadowsOff ? "0" : "1");
-        ini.put("Display", "bDeferredShadows", shadowsOff ? "0" : "1");
-        ini.put("Display", "bDrawLandShadows", shadowsOff ? "0" : "1");
-        ini.put("Display", "bShadowsOnGrass", shadowsOff ? "0" : "1");
-        ini.put("Display", "bShadowMaskZPrepass", shadowsOff ? "0" : "1");
+        ini.put("Display", "bDeferredShadows", "0");
+        ini.put("Display", "bDrawLandShadows", "0");
+        ini.put("Display", "bShadowsOnGrass", "0");
+        /* Both pre-passes are off by default in the game and are known to
+         * cause objects and the shadow mask to flash; do not force them on. */
+        ini.put("Display", "bShadowMaskZPrepass", "0");
+        ini.put("Display", "bMainZPrepass", "0");
 
         int decals = DECAL_COUNT[c.decals];
         ini.put("Decals", "bDecals", decals > 0 ? "1" : "0");
@@ -169,6 +201,12 @@ public final class GameConfigWriter {
         ini.put("Grass", "bAllowCreateGrass", extraLow ? "0" : "1");
         ini.put("Grass", "bAllowLoadGrass", extraLow ? "0" : "1");
         ini.put("Grass", "bDrawShaderGrass", extraLow ? "0" : "1");
+        /* Sun shadows are re-projected on a timer. The default transition is
+         * slow enough to look like the whole shadow sliding sideways while
+         * walking; make the update immediate and frequent instead. These live
+         * in Skyrim.ini [Display], not SkyrimPrefs.ini. */
+        ini.put("Display", "fSunShadowUpdateTime", "0.0000");
+        ini.put("Display", "fSunUpdateThreshold", "0.1000");
         /* fUpdateBudget lives in Skyrim.ini [Trees]; 1.5 is the game's default. */
         ini.put("Trees", "fUpdateBudget",
                 (extraLow || c.disableTreeAnimations) ? "0.0000" : "1.5000");

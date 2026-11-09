@@ -11,6 +11,27 @@ Skyrim Androidborn is a fork of
 [ttom795/Skyrim_Android](https://github.com/ttom795/Skyrim_Android), developed
 independently.
 
+## 0.2.4 — 2026-11-09
+
+Shadow stability.
+
+### Fixes
+- [Shadow distance now follows the shadow detail — ground shadows stop sliding and changing shape when the camera turns]
+  The shadow map reaches past the visible ground instead of ending a few metres ahead of the player.
+- [Shadow bias and blur now follow the shadow detail — shadows stay attached to their casters with fewer stripes]
+  Each level uses its own distance, bias and blur instead of the engine's defaults.
+- [Sun shadows update immediately — no slow drift from the update timer]
+  The delay is zero and the interval is short, so the sun shadow no longer lags behind the camera.
+- [Shadow and main Z pre-passes stay off — no flashing shadow mask or objects]
+  The launcher keeps the game's defaults instead of forcing the pre-passes on.
+- [Deferred land and grass shadows are off — the ground keeps the stable shadow map and the GPU does less work]
+  Character and object shadows still render; the screen-space land/grass pass is skipped.
+
+### Notes
+Tested on a Retroid Pocket G2 (Adreno A22, Android 15): Riverwood street,
+Ultra shadow detail, 30 fps. A new effect can still show a brief hitch while
+its shader compiles; after that the ground shadow stays put.
+
 ## 0.2.3 — 2026-11-08
 
 Performance pass for heavy world scenes.

@@ -8,7 +8,7 @@ Tested on a **Retroid Pocket G2** (Adreno A22, Android 15). Also tested on a
 **Xiaomi 15T** (Mali-G720, Android 15) with the PanVK driver. Mali and
 Immortalis devices need that driver; see the first section.
 
-Current version: **0.2.3** — see [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.2.4** — see [CHANGELOG.md](CHANGELOG.md).
 
 ## Mali and Immortalis GPUs: install the PanVK driver first
 
@@ -44,7 +44,7 @@ Adreno GPUs (Snapdragon) use the system driver; this step is not needed.
 
 ## What you need
 
-- arm64 Android 9 or newer with Vulkan 1.1. Version 0.2.3 is built for
+- arm64 Android 9 or newer with Vulkan 1.1. Version 0.2.4 is built for
   ARMv8.2/LSE (Cortex-A75/A55 and newer); older ARMv8.0 devices should stay
   on 0.2.2.
 - On a Mali or Immortalis GPU, the PanVK driver zip from the first section.
@@ -113,7 +113,7 @@ and **Plugins**.
 | **Detail** | Extra low, Low, Medium, High or Ultra. Low is the default. | One click for the right balance; Extra low is the maximum-savings preset. |
 | **Resolution** | The screen's own resolution or a lower one, stretched to fill the screen. | Lower resolutions are the biggest GPU saving; the screen's own is the sharpest UI. |
 | **Antialiasing / Anisotropic filtering** | MSAA and anisotropic filtering levels. | Lower values reduce GPU work. |
-| **Texture quality / Shadow detail / Decals / Radial blur / Object fade** | The same options as the PC launcher. | Tune visuals against performance. |
+| **Texture quality / Shadow detail / Decals / Radial blur / Object fade** | The same options as the PC launcher; Shadow detail also sets the shadow distance, bias and blur. | Tune visuals against performance. |
 | **Vertical sync** | Locks presentation to the display refresh. | Smooth motion when the frame rate is uncapped. |
 | **Disable shadows** | Turns the shadow passes off. | Less GPU and CPU work, and it no longer runs slower than shadows on. |
 | **Disable tree animations** | Stops per-frame tree animation. | Less CPU work in forests. |

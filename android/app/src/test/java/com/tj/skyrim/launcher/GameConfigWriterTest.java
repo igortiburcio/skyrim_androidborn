@@ -179,6 +179,32 @@ public class GameConfigWriterTest {
     }
 
     @Test
+    public void shadowStabilitySettingsFollowTheShadowDetail() throws Exception {
+        File game = tmp.newFolder("game");
+        write(game, new Choices().shadowDetail(2).build());
+
+        File prefs = prefs(game);
+        assertEquals("6000.0000", iniValue(prefs, "Display", "fShadowDistance"));
+        assertEquals("3000.0000", iniValue(prefs, "Display", "fInteriorShadowDistance"));
+        assertEquals("0.2500", iniValue(prefs, "Display", "fShadowBiasScale"));
+        assertEquals("3", iniValue(prefs, "Display", "iBlurDeferredShadowMask"));
+        assertEquals("3", iniValue(prefs, "Display", "iShadowFilter"));
+        assertEquals("3", iniValue(prefs, "Display", "iShadowMode"));
+        assertEquals("4", iniValue(prefs, "Display", "iShadowMaskQuarter"));
+        assertEquals("1", iniValue(prefs, "Display", "bDrawShadows"));
+        assertEquals("0", iniValue(prefs, "Display", "bDeferredShadows"));
+        assertEquals("0", iniValue(prefs, "Display", "bDrawLandShadows"));
+        assertEquals("0", iniValue(prefs, "Display", "bShadowsOnGrass"));
+        assertEquals("0", iniValue(prefs, "Display", "bShadowMaskZPrepass"));
+        assertEquals("0", iniValue(prefs, "Display", "bMainZPrepass"));
+
+        /* The sun update lives in Skyrim.ini, not SkyrimPrefs.ini. */
+        File ini = skyrimIni(game);
+        assertEquals("0.0000", iniValue(ini, "Display", "fSunShadowUpdateTime"));
+        assertEquals("0.1000", iniValue(ini, "Display", "fSunUpdateThreshold"));
+    }
+
+    @Test
     public void writesLanguageAndGrassToSkyrimIni() throws Exception {
         File game = tmp.newFolder("game");
         write(game, new Choices().language(2).build());
