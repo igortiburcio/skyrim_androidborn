@@ -16,7 +16,7 @@ independently.
 Performance pass for heavy world scenes.
 
 ### Performance
-- [x87 top of stack kept in a local register — about 25% more FPS in the heaviest Whiterun scenes]
+- [x87 top of stack kept in a local register — about 20% less CPU time per frame in CPU-limited scenes]
   The common fld/fstp/fmul/fadd path no longer reloads the FPU stack pointer for every instruction.
 - [Internal symbols hidden and PLT calls removed — less overhead on every recompiled call and a faster start]
   Generated functions no longer go through the dynamic linker.
@@ -24,7 +24,7 @@ Performance pass for heavy world scenes.
   The atomic read-modify-write already provides the ordering x86 needs.
 - [Watchdog diagnostics kept out of the hot path — lower CPU use while playing]
   The per-import record only keeps the cheap last-call fields during normal play.
-- [Guest memory asks for huge pages — fewer TLB misses in the open world]
+- [Guest memory asks for huge pages — fewer TLB misses where the kernel supports them]
   The 4 GiB guest window uses 2 MiB pages when the kernel allows them.
 - [ARMv8.2/LSE build — faster locks and reference counts on modern phones]
   Interlocked operations compile to single instructions instead of outline helper calls.
@@ -33,10 +33,12 @@ Performance pass for heavy world scenes.
 This build targets ARMv8.2/LSE (Cortex-A75/A55 and newer). The Retroid Pocket
 G2 and Xiaomi 15T are supported; older ARMv8.0 devices should stay on 0.2.2.
 
-Tested on a Retroid Pocket G2 (Adreno A22, Android 15) at Whiterun, 1280x720
-low, frame cap off: 39.6 fps on 0.2.2 and 49.6 fps on this build, with CPU per
-frame about 20% lower. CPU and GPU temperatures were similar in both runs
-(about 101 °C and 75 °C).
+At 1280x720 low in Whiterun, where the CPU limits the frame rate, 0.2.2 ran
+at 39.6 fps and 0.2.3 at 49.6 fps; CPU time per frame fell about 20%. At
+1920x1080 with 2x MSAA and 4x anisotropic filtering the GPU is the limit:
+both versions stay around 38 fps at the same GPU clock and similar
+temperatures. The gain is CPU headroom for lower resolutions and settings,
+not extra frames when the GPU is already saturated.
 
 ## 0.2.2 — 2026-11-08
 
