@@ -1321,9 +1321,11 @@ SHIM(VirtualFree) {
 }
 
 /* ===================== interlocked ===================== */
-SHIM(InterlockedIncrement) { __atomic_thread_fence(__ATOMIC_SEQ_CST); uint32_t r_ = __atomic_add_fetch((uint32_t *)(MEM + ARG(0)), 1, __ATOMIC_SEQ_CST); __atomic_thread_fence(__ATOMIC_SEQ_CST); RET(r_, 1); }
-SHIM(InterlockedDecrement) { __atomic_thread_fence(__ATOMIC_SEQ_CST); uint32_t r_ = __atomic_sub_fetch((uint32_t *)(MEM + ARG(0)), 1, __ATOMIC_SEQ_CST); __atomic_thread_fence(__ATOMIC_SEQ_CST); RET(r_, 1); }
-SHIM(InterlockedExchange) { __atomic_thread_fence(__ATOMIC_SEQ_CST); uint32_t r_ = __atomic_exchange_n((uint32_t *)(MEM + ARG(0)), ARG(1), __ATOMIC_SEQ_CST); __atomic_thread_fence(__ATOMIC_SEQ_CST); RET(r_, 2); }
+/* The seq_cst RMW already carries x86's full ordering (acquire+release on
+ * ARM); the old explicit fences only added two dmb ish per call. */
+SHIM(InterlockedIncrement) { uint32_t r_ = __atomic_add_fetch((uint32_t *)(MEM + ARG(0)), 1, __ATOMIC_SEQ_CST); RET(r_, 1); }
+SHIM(InterlockedDecrement) { uint32_t r_ = __atomic_sub_fetch((uint32_t *)(MEM + ARG(0)), 1, __ATOMIC_SEQ_CST); RET(r_, 1); }
+SHIM(InterlockedExchange) { uint32_t r_ = __atomic_exchange_n((uint32_t *)(MEM + ARG(0)), ARG(1), __ATOMIC_SEQ_CST); RET(r_, 2); }
 
 /* ===================== time ===================== */
 static uint64_t now_ns(void) {
@@ -1927,9 +1929,7 @@ SHIM(FormatMessageA) {
 SHIM(LocalFree) { if (ARG(0)) gfree(ARG(0)); RET(0, 1); }
 SHIM(InterlockedCompareExchange) {
     uint32_t exp = ARG(2);
-    __atomic_thread_fence(__ATOMIC_SEQ_CST);
     __atomic_compare_exchange_n((uint32_t *)(MEM + ARG(0)), &exp, ARG(1), 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-    __atomic_thread_fence(__ATOMIC_SEQ_CST);
     RET(exp, 3);
 }
 SHIM(lstrcmpiA) { RET((uint32_t)strcasecmp(GSTR(ARG(0)) ? GSTR(ARG(0)) : "", GSTR(ARG(1)) ? GSTR(ARG(1)) : ""), 2); }

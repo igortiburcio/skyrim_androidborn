@@ -11,6 +11,33 @@ Skyrim Androidborn is a fork of
 [ttom795/Skyrim_Android](https://github.com/ttom795/Skyrim_Android), developed
 independently.
 
+## 0.2.3 — 2026-11-08
+
+Performance pass for heavy world scenes.
+
+### Performance
+- [x87 top of stack kept in a local register — about 25% more FPS in the heaviest Whiterun scenes]
+  The common fld/fstp/fmul/fadd path no longer reloads the FPU stack pointer for every instruction.
+- [Internal symbols hidden and PLT calls removed — less overhead on every recompiled call and a faster start]
+  Generated functions no longer go through the dynamic linker.
+- [Interlocked operations without redundant fences — fewer stalls in busy scenes]
+  The atomic read-modify-write already provides the ordering x86 needs.
+- [Watchdog diagnostics kept out of the hot path — lower CPU use while playing]
+  The per-import record only keeps the cheap last-call fields during normal play.
+- [Guest memory asks for huge pages — fewer TLB misses in the open world]
+  The 4 GiB guest window uses 2 MiB pages when the kernel allows them.
+- [ARMv8.2/LSE build — faster locks and reference counts on modern phones]
+  Interlocked operations compile to single instructions instead of outline helper calls.
+
+### Notes
+This build targets ARMv8.2/LSE (Cortex-A75/A55 and newer). The Retroid Pocket
+G2 and Xiaomi 15T are supported; older ARMv8.0 devices should stay on 0.2.2.
+
+Tested on a Retroid Pocket G2 (Adreno A22, Android 15) at Whiterun, 1280x720
+low, frame cap off: 39.6 fps on 0.2.2 and 49.6 fps on this build, with CPU per
+frame about 20% lower. CPU and GPU temperatures were similar in both runs
+(about 101 °C and 75 °C).
+
 ## 0.2.2 — 2026-11-08
 
 Test suites and the release gate.

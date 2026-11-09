@@ -63,10 +63,19 @@ static GuestFn lookup(uint32_t a) {
 }
 
 /* Watchdog bookkeeping: the last import each thread called, its guest return
- * address and a call counter, so a stall can be located from the log. */
+ * address and a call counter, so a stall can be located from the log. Only the
+ * cheap fields (name, return address, counter) are updated on every call; the
+ * extra register/stack details need LB_WD_DETAIL=1. */
 #define WD_MAX 64
-static struct { const char *name; uint32_t ret; volatile uint32_t calls; uint32_t tid, gtid, esi, ebx, esp; pthread_t th; } g_wd[WD_MAX];
+static struct {
+    const char *name;
+    uint32_t ret;
+    volatile uint32_t calls;
+    uint32_t tid, gtid, esi, ebx, esp;
+    pthread_t th;
+} __attribute__((aligned(64))) g_wd[WD_MAX];
 static int g_wd_n;
+static int g_wd_detail;
 static __thread int t_wd = -1;
 
 static void wd_note(CPU *c, const char *name) {
@@ -78,10 +87,12 @@ static void wd_note(CPU *c, const char *name) {
     }
     g_wd[t_wd].name = name;
     g_wd[t_wd].ret = M32(c->r[4]);
-    g_wd[t_wd].esi = c->r[6];
-    g_wd[t_wd].ebx = c->r[3];
-    g_wd[t_wd].esp = c->r[4];
-    g_wd[t_wd].gtid = M32(c->fs_base + 0x24);
+    if (__builtin_expect(g_wd_detail, 0)) {
+        g_wd[t_wd].esi = c->r[6];
+        g_wd[t_wd].ebx = c->r[3];
+        g_wd[t_wd].esp = c->r[4];
+        g_wd[t_wd].gtid = M32(c->fs_base + 0x24);
+    }
     g_wd[t_wd].calls++;
 }
 
@@ -131,6 +142,12 @@ static void *wd_thread(void *arg) {
             if (tick % 6 == 0) { extern void prof_report(void), cpu_report(void); prof_report(); cpu_report(); }
             for (int i = 0; i < n; i++)
             {
+                if (!g_wd_detail) {
+                    LOG("  thread %d (tid %u): last %s from %08x, %u calls%s",
+                        i, g_wd[i].tid, g_wd[i].name ? g_wd[i].name : "-", g_wd[i].ret, g_wd[i].calls,
+                        still[i] >= 10 ? " (idle)" : "");
+                    continue;
+                }
                 uint32_t e = g_wd[i].esi, ok = e >= 0x10000 && e < 0xFFFFFFF0u;
                 LOG("  thread %d (tid %u, guest %u): last %s from %08x, %u calls%s; esi %08x [%08x %08x]",
                     i, g_wd[i].tid, g_wd[i].gtid, g_wd[i].name ? g_wd[i].name : "-", g_wd[i].ret, g_wd[i].calls,
@@ -158,6 +175,9 @@ static void *wd_thread(void *arg) {
 }
 
 void rt_watchdog_start(void) {
+    const char *d = getenv("LB_WD_DETAIL");
+    g_wd_detail = d && *d && *d != '0';
+    if (g_wd_detail) LOG("watchdog: detailed register/stack records on");
     pthread_t th;
     pthread_create(&th, NULL, wd_thread, NULL);
     pthread_detach(th);

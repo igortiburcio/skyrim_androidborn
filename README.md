@@ -8,7 +8,7 @@ Tested on a **Retroid Pocket G2** (Adreno A22, Android 15). Also tested on a
 **Xiaomi 15T** (Mali-G720, Android 15) with the PanVK driver. Mali and
 Immortalis devices need that driver; see the first section.
 
-Current version: **0.2.2** — see [CHANGELOG.md](CHANGELOG.md).
+Current version: **0.2.3** — see [CHANGELOG.md](CHANGELOG.md).
 
 ## Mali and Immortalis GPUs: install the PanVK driver first
 
@@ -44,7 +44,9 @@ Adreno GPUs (Snapdragon) use the system driver; this step is not needed.
 
 ## What you need
 
-- arm64 Android 9 or newer with Vulkan 1.1.
+- arm64 Android 9 or newer with Vulkan 1.1. Version 0.2.3 is built for
+  ARMv8.2/LSE (Cortex-A75/A55 and newer); older ARMv8.0 devices should stay
+  on 0.2.2.
 - On a Mali or Immortalis GPU, the PanVK driver zip from the first section.
 - Around 3 GB of RAM and 10 GB of free storage.
 - A Steam account that owns the 2011 game, or a `Data` folder from your own

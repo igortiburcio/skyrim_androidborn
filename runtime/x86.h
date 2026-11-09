@@ -44,7 +44,14 @@ typedef struct CPU {
     void *thread;
 } CPU;
 
+/* Optional fixed guest base (-DLB_FIXED_MEM=0x100000000): generated code can
+ * address guest memory directly, without reloading a global pointer after
+ * every store. The runtime maps the 4 GiB window there at startup. */
+#ifdef LB_FIXED_MEM
+#define MEM ((uint8_t *)(uintptr_t)LB_FIXED_MEM)
+#else
 extern uint8_t *MEM;
+#endif
 
 typedef uint32_t __attribute__((aligned(1), may_alias)) u32u;
 typedef uint16_t __attribute__((aligned(1), may_alias)) u16u;

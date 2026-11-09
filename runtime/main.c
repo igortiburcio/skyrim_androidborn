@@ -20,7 +20,11 @@
 #include <SDL2/SDL.h>
 #endif
 
+#ifndef LB_FIXED_MEM
 uint8_t *MEM;
+#else
+static uint8_t *g_guest_base;  /* set once; MEM is a compile-time address */
+#endif
 int g_log_level = 1;
 char g_game_dir[1024] = ".";
 char g_save_dir[1024] = "./save";
@@ -481,10 +485,35 @@ int main(int argc, char **argv) {
 #endif
     if (argc > 1) snprintf(g_game_dir, sizeof g_game_dir, "%s", argv[1]);
     if (argc > 2) snprintf(g_save_dir, sizeof g_save_dir, "%s", argv[2]);
+#ifdef LB_FIXED_MEM
+    {
+        int flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE;
+#ifdef MAP_FIXED_NOREPLACE
+        flags |= MAP_FIXED_NOREPLACE;
+#endif
+        void *base = mmap((void *)(uintptr_t)LB_FIXED_MEM, 1ull << 32, PROT_READ | PROT_WRITE, flags, -1, 0);
+        if (base == MAP_FAILED || (uintptr_t)base != (uintptr_t)LB_FIXED_MEM) {
+            if (base != MAP_FAILED) munmap(base, 1ull << 32);
+            rt_fatal("cannot map guest memory at %p: %s",
+                     (void *)(uintptr_t)LB_FIXED_MEM, strerror(errno));
+        }
+        g_guest_base = (uint8_t *)base;
+    }
+#else
     MEM = mmap(NULL, 1ull << 32, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     if (MEM == MAP_FAILED) rt_fatal("cannot reserve guest address space");
+#endif
+    /* A 4 GiB guest working set is TLB-heavy; ask the kernel for huge pages
+     * (harmless when the device or kernel does not support them). */
+#ifdef MADV_HUGEPAGE
+    if (madvise(MEM, 1ull << 32, MADV_HUGEPAGE) == 0) LOG("guest memory: huge pages requested");
+    else LOG("guest memory: huge pages unavailable (%s)", strerror(errno));
+#endif
     /* keep the null page inaccessible to catch null derefs */
     mprotect(MEM, 0x10000, PROT_NONE);
+#ifdef LB_FIXED_MEM
+    LOG("guest memory at %p (fixed base)", (void *)g_guest_base);
+#endif
     rt_init_shims();
 #ifdef GAME_SKYRIM
     /* LB_IMAGE_TEST=1 maps the four generated images and exits before

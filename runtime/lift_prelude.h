@@ -7,9 +7,28 @@ void rt_call_ic(CPU *c, uint32_t t, const FnEntry **cache);
 jmp_buf *rt_setjmp_slot(CPU *c, uint32_t guest_jb);
 void rt_setjmp3(CPU *c);
 #define SPILL() do { c->r[0] = eax; c->r[1] = ecx; c->r[2] = edx; c->r[3] = ebx; \
-    c->r[4] = esp; c->r[5] = ebp; c->r[6] = esi; c->r[7] = edi; } while (0)
+    c->r[4] = esp; c->r[5] = ebp; c->r[6] = esi; c->r[7] = edi; c->top = fpu_top; } while (0)
 #define RELOAD() do { eax = c->r[0]; ecx = c->r[1]; edx = c->r[2]; ebx = c->r[3]; \
-    esp = c->r[4]; ebp = c->r[5]; esi = c->r[6]; edi = c->r[7]; } while (0)
+    esp = c->r[4]; ebp = c->r[5]; esi = c->r[6]; edi = c->r[7]; fpu_top = c->top; } while (0)
+/* Some MSVC helpers (__EH_prolog, security-cookie setup) deliberately return a
+ * new ebp, so a call boundary must publish and reload every register. The
+ * caller-saved-only macros are kept as aliases: the call-ABI experiment is off
+ * until function-level clobber analysis can prove a callee is conventional. */
+#define SPILL_RET() SPILL()
+#define RELOAD_CALLER() RELOAD()
+/* The x87 top of stack lives in the generated function's fpu_top local; it is
+ * written back to CPU around calls, returns and the rare stack-environment
+ * helpers, so the common fadd/fmul/fld/fstp sequence avoids a load+store of
+ * c->top every time. */
+#undef ST
+#define ST(i) (c->st[(fpu_top + (i)) & 7])
+#define fpush(c, v) do { fpu_top = (fpu_top - 1) & 7; (c)->st[fpu_top] = (v); } while (0)
+#define fpop(c) do { fpu_top = (fpu_top + 1) & 7; } while (0)
+static inline uint16_t fstatus_top(CPU *c, uint32_t top) {
+    return (uint16_t)((c->c3 << 14) | ((top & 7) << 11) | (c->c2 << 10) |
+                      (c->c1 << 9) | (c->c0 << 8));
+}
+#define fstatus(c) fstatus_top((c), fpu_top)
 static inline void rt_movsd(uint32_t n, uint32_t dst, uint32_t src) {
     /* forward rep movsd; overlapping copies must behave like the dword loop */
     if (dst <= src || dst >= src + n * 4) memmove(MEM + dst, MEM + src, (size_t)n * 4);

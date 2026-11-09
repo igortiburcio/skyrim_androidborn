@@ -90,6 +90,12 @@ ST_ = {1: "int8_t", 2: "int16_t", 4: "int32_t", 8: "int64_t"}
 BITS = {1: 8, 2: 16, 4: 32}
 SPILL = "SPILL();"
 RELOAD = "RELOAD();"
+# Experimental: x86 functions normally preserve ebx/esi/edi/ebp, but MSVC
+# helpers such as __EH_prolog deliberately return a new ebp. Off by default;
+# the runtime aliases SPILL_RET/RELOAD_CALLER to the full versions.
+CALL_ABI = os.environ.get("LIFT_CALL_ABI", "0") == "1"
+SPILL_RET = "SPILL_RET();"
+RELOAD_CALLER = "RELOAD_CALLER();"
 
 
 CMP_PRED = {"eq": "a_ == b_", "lt": "a_ < b_", "le": "a_ <= b_", "unord": "a_ != a_ || b_ != b_",
@@ -290,7 +296,10 @@ class Lifter:
         pre = "esp -= 4; M32(esp) = 0x%Xu; %s " % (ret, SPILL)
         if t in self.all_funcs:
             self.calls.add(t)
-            return pre + "f_%X(c); %s" % (t, RELOAD)
+            # A recompiled guest function preserves the callee-saved registers;
+            # a host override may not, so it keeps the full reload.
+            after = RELOAD_CALLER if CALL_ABI and t not in HOST_OVERRIDES.get(MOD, ()) else RELOAD
+            return pre + "f_%X(c); %s" % (t, after)
         return pre + "rt_call(c, 0x%Xu); %s" % (t, RELOAD)
 
     def indirect_jump(self, i, target_expr):
@@ -649,11 +658,11 @@ class Lifter:
                 elif reg == 3:
                     e("MF32(%s) = (float)ST(0); fpop(c);" % a)
                 elif reg == 4:
-                    e("fpu_env(c, %s, 1);" % a)
+                    e("{ c->top = fpu_top; fpu_env(c, %s, 1); fpu_top = c->top; }" % a)
                 elif reg == 5:
                     e("c->fpu_cw = M16(%s);" % a)
                 elif reg == 6:
-                    e("fpu_env(c, %s, 0);" % a)
+                    e("{ c->top = fpu_top; fpu_env(c, %s, 0); fpu_top = c->top; }" % a)
                 elif reg == 7:
                     e("M16(%s) = c->fpu_cw;" % a)
                 else:
@@ -683,9 +692,9 @@ class Lifter:
                 elif reg == 3:
                     e("MF64(%s) = ST(0); fpop(c);" % a)
                 elif reg == 4:
-                    e("fpu_env(c, %s, 3);" % a)
+                    e("{ c->top = fpu_top; fpu_env(c, %s, 3); fpu_top = c->top; }" % a)
                 elif reg == 6:
-                    e("fpu_env(c, %s, 2);" % a)
+                    e("{ c->top = fpu_top; fpu_env(c, %s, 2); fpu_top = c->top; }" % a)
                 elif reg == 7:
                     e("M16(%s) = fstatus(c);" % a)
                 else:
@@ -725,7 +734,7 @@ class Lifter:
             else:
                 ONE = {
                     0xE0: "ST(0) = -ST(0);", 0xE1: "ST(0) = fabs(ST(0));",
-                    0xE4: "fcompare(c, ST(0), 0.0);", 0xE5: "fxam(c);",
+                    0xE4: "fcompare(c, ST(0), 0.0);", 0xE5: "{ c->top = fpu_top; fxam(c); fpu_top = c->top; }",
                     0xE8: "fpush(c, 1.0);", 0xE9: "fpush(c, 3.321928094887362347870);",
                     0xEA: "fpush(c, 1.442695040888963407360);", 0xEB: "fpush(c, M_PI);",
                     0xEC: "fpush(c, 0.301029995663981195214);", 0xED: "fpush(c, M_LN2);",
@@ -734,8 +743,10 @@ class Lifter:
                     0xF1: "ST(1) = ST(1) * log2(ST(0)); fpop(c);",
                     0xF2: "ST(0) = tan(ST(0)); fpush(c, 1.0); c->c2 = 0;",
                     0xF3: "ST(1) = atan2(ST(1), ST(0)); fpop(c);",
-                    0xF5: "fprem(c, 1);", 0xF6: "c->top = (c->top - 1) & 7;",
-                    0xF7: "c->top = (c->top + 1) & 7;", 0xF8: "fprem(c, 0);",
+                    0xF5: "{ c->top = fpu_top; fprem(c, 1); fpu_top = c->top; }",
+                    0xF6: "fpu_top = (fpu_top - 1) & 7;",
+                    0xF7: "fpu_top = (fpu_top + 1) & 7;",
+                    0xF8: "{ c->top = fpu_top; fprem(c, 0); fpu_top = c->top; }",
                     0xF9: "ST(1) = ST(1) * log2(ST(0) + 1.0); fpop(c);",
                     0xFA: "ST(0) = sqrt(ST(0));",
                     0xFB: "{ double v_ = ST(0); ST(0) = sin(v_); fpush(c, cos(v_)); c->c2 = 0; }",
@@ -757,7 +768,7 @@ class Lifter:
             if modrm == 0xE2:
                 e("c->c0 = c->c1 = c->c2 = c->c3 = 0;")
             elif modrm == 0xE3:
-                e("c->top = 0; c->fpu_cw = 0x37F; c->c0 = c->c1 = c->c2 = c->c3 = 0;")
+                e("fpu_top = 0; c->top = 0; c->fpu_cw = 0x37F; c->c0 = c->c1 = c->c2 = c->c3 = 0;")
             elif reg in (0, 1, 2, 3):
                 cond = ["!f.cf", "!f.zf", "(!f.cf && !f.zf)", "!f.pf"][reg]
                 e("if (%s) ST(0) = %s;" % (cond, s))
@@ -828,7 +839,7 @@ class Lifter:
                 return "(uint64_t)%du" % (op.imm & 0xFF)
             raise Unsupported("mmx src")
         if mn in ("emms", "femms"):
-            return ["c->top = 0;"]
+            return ["fpu_top = 0; c->top = 0;"]
         if mn == "movq":
             if ismm(ops[0]):
                 return ["%s = %s;" % (mmr(ops[0]), src64(ops[1]))]
@@ -1148,7 +1159,8 @@ class Lifter:
                  "esp = c->r[4], ebp = c->r[5], esi = c->r[6], edi = c->r[7];")
         o.append("    Flags f = {0};")
         o.append("    uint32_t jt_ = 0;")
-        o.append("    (void)f; (void)jt_;")
+        o.append("    uint32_t fpu_top = c->top;")
+        o.append("    (void)f; (void)jt_; (void)fpu_top;")
         order = sorted(self.blocks)
         if order[0][0] != self.f:
             o.append("    goto L_%X;" % self.f)
@@ -1218,7 +1230,7 @@ class Lifter:
                 t, nxt, SPILL, RELOAD)]
         if x86.X86_GRP_RET in i.groups:
             n = op.imm if op else 0
-            return ["esp += %d; %s return;" % (4 + n, SPILL)]
+            return ["esp += %d; %s return;" % (4 + n, SPILL_RET if CALL_ABI else SPILL)]
         if mn == "jmp":
             if op.type == x86.X86_OP_IMM:
                 return [self.goto(op.imm & 0xFFFFFFFF)]

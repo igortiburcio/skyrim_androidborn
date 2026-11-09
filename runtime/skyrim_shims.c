@@ -237,7 +237,7 @@ SHIM(GetDiskFreeSpaceExA) {
     }
     RET(1, 4);
 }
-SHIM(InterlockedExchangeAdd) { __atomic_thread_fence(__ATOMIC_SEQ_CST); uint32_t r_ = __atomic_fetch_add((uint32_t *)(MEM + ARG(0)), ARG(1), __ATOMIC_SEQ_CST); __atomic_thread_fence(__ATOMIC_SEQ_CST); RET(r_, 2); }
+SHIM(InterlockedExchangeAdd) { uint32_t r_ = __atomic_fetch_add((uint32_t *)(MEM + ARG(0)), ARG(1), __ATOMIC_SEQ_CST); RET(r_, 2); }
 SHIM(SuspendThread) { RET(0, 1); }
 SHIM(SetThreadIdealProcessor) { RET(0, 2); }
 /* (addr, MEMORY_BASIC_INFORMATION*, len) */
