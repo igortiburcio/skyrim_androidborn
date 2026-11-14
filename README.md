@@ -8,7 +8,7 @@ Tested on a **Retroid Pocket G2** (Adreno A22, Android 15). Also tested on a
 **Xiaomi 15T** (Mali-G720, Android 15) with the PanVK driver. Mali and
 Immortalis devices need that driver; see the first section.
 
-Current version: **0.2.5** — see [CHANGELOG.md](CHANGELOG.md).
+Current version: **1.0.0** — see [CHANGELOG.md](CHANGELOG.md).
 
 ## Mali and Immortalis GPUs: install the PanVK driver first
 
@@ -286,7 +286,22 @@ tools/release.sh 0.2.0
 The release script checks that `CHANGELOG.md` has a section for the version,
 that every bullet follows the `[Technical change — Positive impact]` format,
 builds the release APK and creates the GitHub Release with the APK attached.
-See [RULES.md](RULES.md).
+It also publishes `SHA256SUMS` next to the APK: the launcher checks that
+digest (or the one GitHub reports for the asset) and refuses an update it
+cannot verify. See [RULES.md](RULES.md).
+
+The release APK is signed with a key kept outside the repository:
+
+- key: `~/.local/share/skyrim-androidborn/release.jks`
+- passwords and alias: `~/.local/share/skyrim-androidborn/keystore.properties`,
+  linked from `android/keystore.properties` (git-ignored)
+- certificate SHA-256:
+  `D8:74:78:20:39:78:A6:D9:E8:F6:1D:DF:E5:F2:9C:FA:2D:30:68:A1:F1:3E:00:0A:63:63:15:72:30:77:EE:53`
+
+Keep that key: a different one cannot update an installed copy. Without
+`android/keystore.properties` the release build refuses to run.
+`tools/build_release.sh` prints the certificate it finds and writes
+`SHA256SUMS` before anything is published.
 
 ### Steam client and licenses
 

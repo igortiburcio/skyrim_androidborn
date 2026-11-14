@@ -1,6 +1,7 @@
 package com.tj.skyrim;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
@@ -19,6 +20,8 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import com.tj.skyrim.launcher.BackdropView;
+import com.tj.skyrim.launcher.Compatibility;
+import com.tj.skyrim.launcher.CrashReport;
 import com.tj.skyrim.launcher.DisplayModes;
 import com.tj.skyrim.launcher.DriverRegistry;
 import com.tj.skyrim.launcher.DriverSection;
@@ -32,12 +35,14 @@ import com.tj.skyrim.launcher.GamepadController;
 import com.tj.skyrim.launcher.GamepadController.Host;
 import com.tj.skyrim.launcher.LaunchPlan;
 import com.tj.skyrim.launcher.LauncherSettings;
+import com.tj.skyrim.launcher.LogExporter;
 import com.tj.skyrim.launcher.LauncherWindow;
 import com.tj.skyrim.launcher.OptionsSection;
 import com.tj.skyrim.launcher.PluginRegistry;
 import com.tj.skyrim.launcher.PluginsSection;
 import com.tj.skyrim.launcher.SteamDownloadState;
 import com.tj.skyrim.launcher.StorageAccess;
+import com.tj.skyrim.launcher.SupportSection;
 import com.tj.skyrim.launcher.UpdateChecker;
 import com.tj.skyrim.launcher.UpdateDownloader;
 import com.tj.skyrim.launcher.UpdatePanel;
@@ -82,10 +87,13 @@ public class LauncherActivity extends Activity
     private PluginsSection pluginsSection;
     private DriverSection driverSection;
     private OptionsSection optionsSection;
+    private SupportSection supportSection;
     private LauncherWindow window;
     private List<LauncherWindow.Content> gameFilesTabs;
     private List<LauncherWindow.Content> settingsTabs;
 
+    private Compatibility.Problem compatProblem;
+    private boolean driverHintShown;
     private BackdropView backdrop;
     private LinearLayout menuGroup;
     private Button playMenu, gameFilesMenu, settingsMenu;
@@ -112,6 +120,7 @@ public class LauncherActivity extends Activity
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        CrashReport.install(this);
 
         settings = new LauncherSettings(this);
         storage = new StorageAccess(this);
@@ -129,9 +138,10 @@ public class LauncherActivity extends Activity
         pluginsSection = new PluginsSection(widgets, new PluginRegistry(settings));
         driverSection = new DriverSection(widgets, new DriverRegistry(settings), this);
         optionsSection = new OptionsSection(widgets, settings, modes);
+        supportSection = new SupportSection(widgets, this::exportLogs);
         updateDownloader = new UpdateDownloader(this);
         gameFilesTabs = Arrays.asList(gameFiles);
-        settingsTabs = Arrays.asList(optionsSection, driverSection, pluginsSection);
+        settingsTabs = Arrays.asList(optionsSection, driverSection, pluginsSection, supportSection);
 
         ViewGroup root = buildScreen();
         setContentView(root);
@@ -150,6 +160,14 @@ public class LauncherActivity extends Activity
         window.prepare(gameFilesTabs);
         root.post(this::fitMenu);
 
+        compatProblem = Compatibility.check(this);
+        if (compatProblem != null && compatProblem.blocking) {
+            showCompatProblem(compatProblem);
+        } else if (compatProblem != null && !settings.flag("warned_low_ram", false)) {
+            /* one notice per install; the device may still run the game */
+            settings.setFlag("warned_low_ram", true);
+            showCompatProblem(compatProblem);
+        }
         refresh();
         focusDefaultControl();
         playMenu.post(this::focusDefaultControlIfLost);
@@ -422,12 +440,54 @@ public class LauncherActivity extends Activity
 
     private void play() {
         if (isFinishing() || !gameFiles.ready()) return;
+        if (compatProblem != null && compatProblem.blocking) {
+            showCompatProblem(compatProblem);
+            return;
+        }
+        if (!driverHintShown && Compatibility.needsCustomDriver(this, settings)) {
+            driverHintShown = true;
+            showDriverHint();
+            return;
+        }
         if (!storage.granted()) {
             pendingPlay = true;
             storage.request();
             return;
         }
 
+        startGame();
+    }
+
+    /** Shows the device problem; the launcher stays usable unless blocking. */
+    private void showCompatProblem(Compatibility.Problem problem) {
+        if (isFinishing()) return;
+        new AlertDialog.Builder(this)
+                .setTitle(problem.title)
+                .setMessage(problem.message)
+                .setPositiveButton("OK", null)
+                .show();
+    }
+
+    /**
+     * Mali/Immortalis with the system driver: the stock driver crashes in its
+     * shader compiler, so offer the Driver tab before starting the game.
+     */
+    private void showDriverHint() {
+        if (isFinishing()) return;
+        new AlertDialog.Builder(this)
+                .setTitle("A custom Vulkan driver is needed")
+                .setMessage("This device reports a Mali GPU. Its stock driver closes "
+                        + "the game during the first shader compile. Install the PanVK "
+                        + "driver zip in Settings > Driver, select it, then press Play.")
+                .setPositiveButton("Open driver settings", (d, w) -> {
+                    windowOpener = settingsMenu;
+                    window.open(settingsTabs, settingsTabs.indexOf(driverSection));
+                })
+                .setNegativeButton("Continue anyway", (d, w) -> play())
+                .show();
+    }
+
+    private void startGame() {
         try {
             optionsSection.persist();
             pluginsSection.persist();
@@ -695,8 +755,30 @@ public class LauncherActivity extends Activity
             updatePanel.error("The downloaded update is not the expected version.");
             return;
         }
-        if (pendingUpdate.sha256.isEmpty()) openInstaller();
-        else verifyThenInstall(apk);
+        if (pendingUpdate.sha256.isEmpty()) {
+            /* 1.0 rule: never hand the installer something nobody verified. */
+            updatePanel.downloaded(false);
+            settings.updateDownloadId(-1);
+            settings.updateVersion("");
+            apk.delete();
+            updatePanel.error("This update has no checksum on GitHub, so it "
+                    + "cannot be verified. Download it from the release page.");
+            return;
+        }
+        verifyThenInstall(apk);
+    }
+
+    /** Writes the log zip in the background and reports the path. */
+    private void exportLogs() {
+        new Thread(() -> {
+            try {
+                File zip = LogExporter.export(LauncherActivity.this, settings);
+                runOnUiThread(() -> supportSection.exported(zip));
+            } catch (Exception e) {
+                String message = e.getMessage() == null ? "The export failed." : e.getMessage();
+                runOnUiThread(() -> supportSection.failed(message));
+            }
+        }, "log-export").start();
     }
 
     private void verifyThenInstall(File apk) {

@@ -19,6 +19,15 @@ export ANDROID_SDK_ROOT="$ANDROID_HOME"
 export PATH="$JAVA_HOME/bin:$PATH"
 NDK=${ANDROIDBORN_NDK:-29.0.14206865}
 
+# The release key lives outside the repository; android/keystore.properties is
+# a local symlink to it. Without it Gradle produces an unsigned APK, so stop
+# here instead of publishing something Android will refuse to install.
+KEYPROPS="$ROOT/android/keystore.properties"
+if [ ! -f "$KEYPROPS" ]; then
+    echo "build_release.sh: missing $KEYPROPS (release key). See README 'Signing'." >&2
+    exit 1
+fi
+
 cleanup() { rm -f "$ASSET"; }
 trap cleanup EXIT INT TERM
 
@@ -30,4 +39,15 @@ fi
 cd "$ROOT/android"
 bash ./gradlew :app:assembleRelease -PndkVersion="$NDK"
 cp app/build/outputs/apk/release/app-release.apk "$OUT"
+
+# Prove the APK carries the release certificate before it is published, and
+# write the checksum the launcher's updater checks.
+APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
+if [ -z "$APKSIGNER" ] || [ ! -x "$APKSIGNER" ]; then
+    echo "build_release.sh: apksigner not found under $ANDROID_HOME/build-tools" >&2
+    exit 1
+fi
+"$APKSIGNER" verify --print-certs "$OUT"
+(cd "$(dirname "$OUT")" && sha256sum "$(basename "$OUT")" > SHA256SUMS)
+cat "$(dirname "$OUT")/SHA256SUMS"
 echo "done: $OUT"

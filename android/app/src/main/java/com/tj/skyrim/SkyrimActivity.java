@@ -18,6 +18,7 @@ import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import com.tj.skyrim.launcher.CrashReport;
 import java.io.File;
 import java.io.FileWriter;
 import java.util.Date;
@@ -39,6 +40,7 @@ public class SkyrimActivity extends SDLActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        CrashReport.install(this);
         saveLastExit();
         setDriverEnv();
         setupEnv();

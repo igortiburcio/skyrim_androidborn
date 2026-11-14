@@ -24,6 +24,7 @@ android/build/
 android/app/build/
 android/app/.cxx/
 android/local.properties
+android/keystore.properties
 steam/build/
 tools/__pycache__/
 tests/python/__pycache__/

@@ -96,6 +96,8 @@ public final class UpdateChecker {
             if (!force && !isNewer(version, current)) return null;
 
             String apkUrl = "";
+            String apkName = "";
+            String sumsUrl = "";
             long apkSize = 0;
             String sha256 = "";
             JSONArray assets = json.optJSONArray("assets");
@@ -105,20 +107,65 @@ public final class UpdateChecker {
                     if (asset == null) continue;
                     String name = asset.optString("name", "");
                     String url = asset.optString("browser_download_url", "");
-                    if (!name.endsWith(".apk") || !trustedUrl(url)) continue;
+                    if (name.equals("SHA256SUMS") && trustedUrl(url)) {
+                        sumsUrl = url;
+                        continue;
+                    }
+                    if (!apkUrl.isEmpty() || !name.endsWith(".apk") || !trustedUrl(url)) continue;
                     apkUrl = url;
+                    apkName = name;
                     apkSize = asset.optLong("size", 0);
                     String digest = asset.optString("digest", "");
                     if (digest.startsWith("sha256:")) sha256 = digest.substring(7);
-                    break;
                 }
             }
+
+            /* Older releases carry no per-asset digest; the release also
+             * publishes a SHA256SUMS file, so use that instead of installing
+             * an update nobody verified. */
+            if (sha256.isEmpty() && !sumsUrl.isEmpty() && !apkName.isEmpty())
+                sha256 = sumsDigest(sumsUrl, apkName);
 
             return new Release(version, json.optString("html_url", ""),
                     json.optString("body", "").trim(), apkUrl, apkSize, sha256);
         } finally {
             connection.disconnect();
         }
+    }
+
+    /**
+     * Downloads a release's SHA256SUMS and returns the digest for one file,
+     * or "" when the file is not listed. Eight hex characters are enough to
+     * prove the line is a checksum; the caller compares all 64.
+     */
+    private static String sumsDigest(String sumsUrl, String fileName) {
+        try {
+            HttpURLConnection connection = (HttpURLConnection) new URL(sumsUrl).openConnection();
+            try {
+                connection.setConnectTimeout(6000);
+                connection.setReadTimeout(6000);
+                connection.setRequestProperty("Accept-Encoding", "identity");
+                connection.setRequestProperty("User-Agent", USER_AGENT);
+                if (connection.getResponseCode() != 200) return "";
+                InputStream in = connection.getInputStream();
+                if ("gzip".equalsIgnoreCase(connection.getContentEncoding())) {
+                    in = new GZIPInputStream(in);
+                }
+                for (String line : read(in).split("\n")) {
+                    String[] fields = line.trim().split("\\s+");
+                    if (fields.length < 2) continue;
+                    String name = fields[fields.length - 1].replaceFirst("^\\*", "");
+                    if (!name.equals(fileName)) continue;
+                    String hash = fields[0].toLowerCase();
+                    return hash.matches("[0-9a-f]{64}") ? hash : "";
+                }
+            } finally {
+                connection.disconnect();
+            }
+        } catch (Throwable ignored) {
+            /* no checksum file: the update stays unverified and is refused */
+        }
+        return "";
     }
 
     /** "v0.1.6" becomes "0.1.6"; "0.1.5-dual" becomes "0.1.5". */

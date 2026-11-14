@@ -4,14 +4,19 @@ package com.tj.skyrim.steam;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStreamWriter;
 import java.io.RandomAccessFile;
+import java.io.Writer;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import okhttp3.OkHttpClient;
 
@@ -261,25 +266,54 @@ public final class SteamDownloader {
             throw new SteamException("cannot create folder " + parent);
         }
         File part = new File(parent, out.getName() + ".part");
-        if (part.exists() && !part.delete()) {
-            throw new SteamException("cannot replace " + part);
+        File state = new File(parent, out.getName() + ".part.state");
+        /* Resume: the chunks already written are listed in the state file, so
+         * an interrupted 8.4 GB download continues where it stopped instead of
+         * starting the file over. */
+        Set<Long> written = readState(state, file);
+        boolean fresh = !(part.isFile() && part.length() == file.size && !written.isEmpty());
+        if (fresh) {
+            written.clear();
+            deleteQuietly(state);
+            if (part.exists() && !part.delete()) {
+                throw new SteamException("cannot replace " + part);
+            }
         }
-        long done = doneBase;
-        try (RandomAccessFile raf = new RandomAccessFile(part, "rw")) {
+        long remaining = 0;
+        for (DepotManifest.Chunk chunk : file.chunks) {
+            if (!written.contains(chunk.offset)) remaining += chunk.uncompressedLength;
+        }
+        long done = doneBase + (file.size - remaining);
+        int sinceFlush = 0;
+        try (RandomAccessFile raf = new RandomAccessFile(part, "rw");
+             Writer st = new OutputStreamWriter(new FileOutputStream(state, !fresh), "UTF-8")) {
+            if (fresh) {
+                st.write(header(file));
+                st.write('\n');
+            }
             raf.setLength(file.size);
             for (DepotManifest.Chunk chunk : file.chunks) {
                 checkCancelled();
+                if (written.contains(chunk.offset)) continue;
                 byte[] encrypted = cdn.fetchChunk(
                         hosts, depot.id, chunk.sha, chunk.compressedLength);
                 byte[] plain = ChunkDecoder.decode(chunk, encrypted, depot.key);
                 raf.seek(chunk.offset);
                 raf.write(plain);
+                st.write(Long.toString(chunk.offset));
+                st.write('\n');
+                if (++sinceFlush >= 64) {
+                    st.flush();
+                    sinceFlush = 0;
+                }
                 done += plain.length;
                 listener.onProgress(done, total, file.name);
             }
+            st.flush();
         }
         if (file.shaContent.length > 0 && !sha1(part).equals(hex(file.shaContent))) {
-            part.delete();
+            deleteQuietly(part);
+            deleteQuietly(state);
             throw new SteamException("file hash mismatch: " + file.name);
         }
         if (out.exists() && !out.delete()) {
@@ -287,6 +321,48 @@ public final class SteamDownloader {
         }
         if (!part.renameTo(out)) {
             throw new SteamException("cannot rename " + part);
+        }
+        deleteQuietly(state);
+    }
+
+    /**
+     * Chunk offsets already written to a .part file, or an empty set. The
+     * first line pins the file the offsets belong to, so a new build of the
+     * depot (same name, different contents) cannot reuse stale pieces.
+     */
+    private static Set<Long> readState(File state, DepotManifest.FileEntry file) {
+        Set<Long> out = new HashSet<>();
+        if (!state.isFile()) return out;
+        String want = header(file);
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(new FileInputStream(state), "UTF-8"))) {
+            String header = reader.readLine();
+            if (header == null || !header.equals(want)) return out;
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty()) continue;
+                try {
+                    out.add(Long.parseLong(line));
+                } catch (NumberFormatException ignored) {
+                    /* a torn last line from a power cut: ignore it */
+                }
+            }
+        } catch (IOException ignored) {
+            out.clear();
+        }
+        return out;
+    }
+
+    /** Version, size and content hash of the file the state belongs to. */
+    private static String header(DepotManifest.FileEntry file) {
+        return "v1 " + file.size + " " + hex(file.shaContent);
+    }
+
+    private static void deleteQuietly(File file) {
+        try {
+            if (file.exists()) file.delete();
+        } catch (Throwable ignored) {
         }
     }
 

@@ -5,6 +5,16 @@ apply plugin: 'com.android.application'
 // the native code is the same, so both builds share the CMake outputs.
 def dual = project.hasProperty('dual') && project.property('dual') == 'true'
 
+// Release signing key, kept outside the repository (see README "Signing").
+// android/keystore.properties is a local symlink to the real file; without it
+// the release build produces an unsigned APK and tools/build_release.sh stops.
+def keystorePropsFile = rootProject.file("keystore.properties")
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+def hasReleaseKey = keystorePropsFile.exists() && keystoreProps['storeFile'] != null
+
 android {
     namespace "com.tj.skyrim"
     compileSdkVersion 34
@@ -15,12 +25,22 @@ android {
         buildConfigField "boolean", "DUAL", dual ? "true" : "false"
         minSdkVersion 28
         targetSdkVersion 29  // legacy storage: plain file access with the normal storage prompt
-        versionCode 107
-        versionName dual ? "0.2.5-dual" : "0.2.5"
+        versionCode 1000
+        versionName dual ? "1.0.0-dual" : "1.0.0"
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_STL=c++_shared", "-DANDROID_PLATFORM=android-28"
                 abiFilters 'arm64-v8a'
+            }
+        }
+    }
+    signingConfigs {
+        release {
+            if (hasReleaseKey) {
+                storeFile file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
             }
         }
     }
@@ -33,7 +53,7 @@ android {
         }
         release {
             minifyEnabled false
-            signingConfig signingConfigs.debug
+            if (hasReleaseKey) signingConfig signingConfigs.release
         }
     }
     externalNativeBuild {

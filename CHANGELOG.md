@@ -11,6 +11,35 @@ Skyrim Androidborn is a fork of
 [ttom795/Skyrim_Android](https://github.com/ttom795/Skyrim_Android), developed
 independently.
 
+## 1.0.0 — 2026-11-14
+
+The first release made to be updated: verified downloads, one-tap reports and
+a launcher that says why a device cannot run the game.
+
+### New
+- [Export logs in the Support tab — one tap gives the file a bug report needs]
+  The zip holds the game log, the last exit report, the graphics settings and
+  the device summary, and lands in the game's port folder.
+- [Device check before Play — a sentence instead of the game closing at the logo]
+  Vulkan 1.1 and the memory the game needs are checked, and a Mali or
+  Immortalis phone is asked to install the custom Vulkan driver first.
+- [Resumed Steam download — an interrupted 8.4 GB download continues where it stopped]
+  The parts already written are kept and skipped on the next attempt.
+
+### Fixes
+- [Java crashes are recorded next to the game log — the reason for a close survives the restart]
+  The launcher, the game activity and the download service all add their trace
+  to last_exit.txt.
+- [Updates are checked against the release checksum — the launcher refuses a file it cannot verify]
+  The APK is signed and published with its SHA-256, and a download without
+  either one is not handed to the installer.
+
+### Notes
+Tested on a Retroid Pocket G2 (Adreno A22, Android 15): install over 0.2.5,
+launcher, main menu at 30 fps, audio, fullscreen and coming back from the
+background. The Android package of every release now carries the release key
+and a SHA256SUMS asset next to the APK.
+
 ## 0.2.5 — 2026-11-14
 
 Coming back to the game after minimising it.

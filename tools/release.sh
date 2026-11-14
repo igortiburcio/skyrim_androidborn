@@ -51,6 +51,7 @@ echo "running tests"
 
 APK="$ROOT/Skyrim-Androidborn-$V.apk"
 "$ROOT/tools/build_release.sh" "$APK"
+SUMS="$ROOT/SHA256SUMS"
 
 if ! command -v gh >/dev/null 2>&1; then
     echo "GitHub CLI (gh) not found; release APK is at $APK" >&2
@@ -62,9 +63,9 @@ fi
 
 if gh release view "v$V" >/dev/null 2>&1; then
     gh release edit "v$V" --title "Skyrim Androidborn $V" --notes-file "$NOTES"
-    gh release upload "v$V" "$APK" --clobber
+    gh release upload "v$V" "$APK" "$SUMS" --clobber
 else
-    gh release create "v$V" "$APK" --title "Skyrim Androidborn $V" --notes-file "$NOTES"
+    gh release create "v$V" "$APK" "$SUMS" --title "Skyrim Androidborn $V" --notes-file "$NOTES"
 fi
 
 echo "release: $(gh release view "v$V" --json url -q .url)"
