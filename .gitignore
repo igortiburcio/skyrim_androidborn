@@ -18,6 +18,9 @@ log.txt
 GAME/
 # Build outputs (APKs go on GitHub Releases as assets, not in git)
 *.apk
+# Written next to the release APK by tools/build_release.sh and published
+# as a release asset
+/SHA256SUMS
 /build/
 android/.gradle/
 android/build/
