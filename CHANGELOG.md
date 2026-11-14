@@ -11,19 +11,20 @@ Skyrim Androidborn is a fork of
 [ttom795/Skyrim_Android](https://github.com/ttom795/Skyrim_Android), developed
 independently.
 
-## Unreleased
+## 0.2.5 — 2026-11-14
 
-Returning to the game after minimising it.
+Coming back to the game after minimising it.
 
 ### Fixes
-- [Swap chain is rebuilt on a new surface when Android replaces the game window — the picture comes back after you minimise and reopen the game]
-  Before, the game kept running behind a black screen until it was closed.
+- [The swap chain is rebuilt on the new surface when Android replaces the game window — the picture comes back after you minimise and reopen the game]
+  The game no longer keeps running behind a black screen until it is closed.
 - [A failed swap chain rebuild is retried on the next frame — no black screen or crash while the app is in the background]
   Frames are skipped while there is no window to draw to.
 
 ### Notes
-Tested on a Retroid Pocket 5 (Adreno 650, Android 13): main menu, then the
-game minimised with Home and reopened from the recent apps twice in a row.
+Tested on a Retroid Pocket 5 (Adreno 650, Android 13) and a Retroid Pocket G2
+(Adreno A22, Android 15): main menu, minimised with Home and reopened, three
+times in a row, at 30 fps.
 
 ## 0.2.4 — 2026-11-09
 

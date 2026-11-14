@@ -15,8 +15,8 @@ android {
         buildConfigField "boolean", "DUAL", dual ? "true" : "false"
         minSdkVersion 28
         targetSdkVersion 29  // legacy storage: plain file access with the normal storage prompt
-        versionCode 106
-        versionName dual ? "0.2.4-dual" : "0.2.4"
+        versionCode 107
+        versionName dual ? "0.2.5-dual" : "0.2.5"
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_STL=c++_shared", "-DANDROID_PLATFORM=android-28"
