@@ -102,6 +102,36 @@ namespace dxvk::vk {
 
   
   VkResult Presenter::recreateSwapChain(const PresenterDesc& desc) {
+    VkResult status = recreateSwapChainImpl(desc);
+
+    // Port (Android): minimising the app destroys the window's native
+    // surface and restoring it creates a new one. The VkSurfaceKHR made from
+    // the old window still answers the capability query, but the format,
+    // present mode or swap chain calls that follow fail with SURFACE_LOST, so
+    // the surface was never recreated and the game kept running with a black
+    // screen. Make a new surface from the current window and try once more.
+    if (status == VK_ERROR_SURFACE_LOST_KHR) {
+      Logger::info("Presenter: surface lost, recreating it from the current window");
+
+      destroySwapchain();
+      destroySurface();
+
+      if (createSurface() != VK_SUCCESS) {
+        // No window right now (app in the background). Stay without a swap
+        // chain; the caller skips presents and tries again on the next frame.
+        m_info.imageCount = 0;
+        m_info.format     = { VK_FORMAT_UNDEFINED, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+        return VK_SUCCESS;
+      }
+
+      status = recreateSwapChainImpl(desc);
+    }
+
+    return status;
+  }
+
+
+  VkResult Presenter::recreateSwapChainImpl(const PresenterDesc& desc) {
     if (m_swapchain)
       destroySwapchain();
 
@@ -185,8 +215,12 @@ namespace dxvk::vk {
       "\n  Exclusive FS: ", desc.fullScreenExclusive));
     
     if ((status = m_vkd->vkCreateSwapchainKHR(m_vkd->device(),
-        &swapInfo, nullptr, &m_swapchain)) != VK_SUCCESS)
+        &swapInfo, nullptr, &m_swapchain)) != VK_SUCCESS) {
+      // Do not report a half-built swap chain; the caller retries.
+      m_swapchain       = VK_NULL_HANDLE;
+      m_info.imageCount = 0;
       return status;
+    }
     
     // Acquire images and create views
     std::vector<VkImage> images;
@@ -448,19 +482,25 @@ namespace dxvk::vk {
 
 
   VkResult Presenter::createSurface() {
+    m_surface = VK_NULL_HANDLE;
+
     VkResult status = wsi::createSurface(m_window, m_vki, &m_surface);
-    
-    if (status != VK_SUCCESS)
+
+    if (status != VK_SUCCESS) {
+      m_surface = VK_NULL_HANDLE;
       return status;
-    
+    }
+
     VkBool32 supportStatus = VK_FALSE;
 
     if ((status = m_vki->vkGetPhysicalDeviceSurfaceSupportKHR(m_device.adapter,
-        m_device.queueFamily, m_surface, &supportStatus)) != VK_SUCCESS)
+        m_device.queueFamily, m_surface, &supportStatus)) != VK_SUCCESS) {
+      destroySurface();
       return status;
-    
+    }
+
     if (!supportStatus) {
-      m_vki->vkDestroySurfaceKHR(m_vki->instance(), m_surface, nullptr);
+      destroySurface();
       return VK_ERROR_OUT_OF_HOST_MEMORY; // just abuse this
     }
 
@@ -487,7 +527,10 @@ namespace dxvk::vk {
 
 
   void Presenter::destroySurface() {
-    m_vki->vkDestroySurfaceKHR(m_vki->instance(), m_surface, nullptr);
+    if (m_surface)
+      m_vki->vkDestroySurfaceKHR(m_vki->instance(), m_surface, nullptr);
+
+    m_surface = VK_NULL_HANDLE;
   }
 
 }

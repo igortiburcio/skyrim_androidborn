@@ -820,6 +820,12 @@ namespace dxvk {
     for (uint32_t i = 0; i < SyncInterval || i < 1; i++) {
       SynchronizePresent();
 
+      // Port: the swap chain can be gone after SynchronizePresent (the
+      // window was destroyed while the app was in the background). Drop the
+      // frame; the next Present rebuilds the swap chain.
+      if (!m_presenter->hasSwapChain())
+        return;
+
       // Presentation semaphores and WSI swap chain image
       vk::PresenterInfo info = m_presenter->info();
       vk::PresenterSync sync;
@@ -830,7 +836,10 @@ namespace dxvk {
 
       while (status != VK_SUCCESS && status != VK_SUBOPTIMAL_KHR) {
         RecreateSwapChain(m_vsync);
-        
+
+        if (!m_presenter->hasSwapChain())
+          return;
+
         info = m_presenter->info();
         status = m_presenter->acquireNextImage(sync, imageIndex);
       }
@@ -917,9 +926,20 @@ namespace dxvk {
     presenterDesc.numPresentModes = PickPresentModes(Vsync, presenterDesc.presentModes);
     presenterDesc.fullScreenExclusive = PickFullscreenMode();
 
-    if (m_presenter->recreateSwapChain(presenterDesc) != VK_SUCCESS)
-      throw DxvkError("D3D9SwapChainEx: Failed to recreate swap chain");
-    
+    VkResult recreateStatus = m_presenter->recreateSwapChain(presenterDesc);
+
+    if (recreateStatus != VK_SUCCESS) {
+      // Port (Android): the window can be missing or still changing while
+      // the app is minimised or restored. Treating that as a lost device
+      // ended the game, so keep running without a swap chain; the next
+      // Present sees !hasSwapChain() and tries again.
+      Logger::warn(str::format(
+        "D3D9SwapChainEx: Failed to recreate swap chain (", recreateStatus,
+        "), retrying on the next present"));
+      m_imageViews.clear();
+      return;
+    }
+
     CreateRenderTargetViews();
   }
 

@@ -237,6 +237,9 @@ namespace dxvk::vk {
             VkPresentModeKHR          presentMode,
             uint32_t                  desired);
 
+    VkResult recreateSwapChainImpl(
+      const PresenterDesc&  desc);
+
     VkResult createSurface();
 
     void destroySwapchain();
