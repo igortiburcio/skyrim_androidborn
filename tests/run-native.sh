@@ -39,6 +39,7 @@ build_cxx() {
 }
 
 build_c test_ini "$ROOT/runtime/ini.c" "$ROOT/tests/native/test_ini.c"
+build_c test_input "$ROOT/tests/native/test_input.c"
 build_c test_fpu "$ROOT/runtime/fpu.c" "$ROOT/tests/native/test_fpu.c"
 build_cxx test_touch "$ROOT/tests/native/test_touch.cpp"
 build_cxx test_bc "$ROOT/tests/native/test_bc.cpp"

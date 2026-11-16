@@ -1,14 +1,12 @@
 /* Input: XInput 1.3 shims backed by SDL game controllers, plus a virtual
  * pad fed by the keyboard (desktop) and the touch overlay (Android). */
 #include "rt.h"
+#include "input_merge.h"
 #include <SDL2/SDL.h>
 
 static SDL_GameController *g_pads[4];
-static struct {
-    uint16_t buttons;
-    uint8_t lt, rt;
-    int16_t lx, ly, rx, ry;
-} g_virt;
+static SDL_JoystickID g_pad_id[4];   /* instance id of the pad in each slot */
+static RTPadState g_virt;
 static uint32_t g_packet;
 static int g_nintendo;  /* swap A/B and X/Y on physical controllers */
 
@@ -48,15 +46,50 @@ void input_set_virtual(uint16_t buttons, int16_t lx, int16_t ly, int16_t rx, int
     g_packet++;
 }
 
+/* Opens joystick `index` in the first free slot. A pad that is already open is
+ * closed again, so an add event and the startup scan cannot open it twice. */
+static void open_pad(int index) {
+    if (!SDL_IsGameController(index)) return;  /* no gamepad mapping: nothing to read */
+    SDL_GameController *p = SDL_GameControllerOpen(index);
+    if (!p) {
+        LOG("input: joystick %d left alone (%s)", index, SDL_GetError());
+        return;
+    }
+    SDL_JoystickID id = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(p));
+    for (int i = 0; i < 4; i++)
+        if (g_pads[i] && g_pad_id[i] == id) { SDL_GameControllerClose(p); return; }
+    for (int i = 0; i < 4; i++)
+        if (!g_pads[i]) {
+            g_pads[i] = p;
+            g_pad_id[i] = id;
+            LOG("input: pad %d = %s", i, SDL_GameControllerName(p));
+            return;
+        }
+    LOG("input: no free slot for %s", SDL_GameControllerName(p));
+    SDL_GameControllerClose(p);
+}
+
+/* Opens the pads that were already attached before the event pump started
+ * (Android also sees a controller connected before launch this way). */
+void input_scan_pads(void) {
+    int n = SDL_NumJoysticks();
+    for (int i = 0; i < n; i++) {
+        LOG("input: joystick %d = %s%s", i, SDL_JoystickNameForIndex(i),
+            SDL_IsGameController(i) ? "" : " (no gamepad mapping)");
+        open_pad(i);
+    }
+}
+
 void input_handle_event(const SDL_Event *e) {
+    static int scanned;
+    if (!scanned) { scanned = 1; input_scan_pads(); }
     switch (e->type) {
     case SDL_CONTROLLERDEVICEADDED:
-        for (int i = 0; i < 4; i++)
-            if (!g_pads[i]) { g_pads[i] = SDL_GameControllerOpen(e->cdevice.which); break; }
+        open_pad(e->cdevice.which);
         break;
     case SDL_CONTROLLERDEVICEREMOVED:
         for (int i = 0; i < 4; i++)
-            if (g_pads[i] && SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(g_pads[i])) == e->cdevice.which) {
+            if (g_pads[i] && g_pad_id[i] == e->cdevice.which) {
                 SDL_GameControllerClose(g_pads[i]);
                 g_pads[i] = NULL;
             }
@@ -83,52 +116,71 @@ void input_handle_event(const SDL_Event *e) {
     }
 }
 
+/* Reads one physical pad into an XInput-shaped report. */
+static void read_pad(SDL_GameController *p, RTPadState *s) {
+    static const struct { SDL_GameControllerButton b; uint16_t bit; } map[] = {
+        {SDL_CONTROLLER_BUTTON_DPAD_UP, 0x1}, {SDL_CONTROLLER_BUTTON_DPAD_DOWN, 0x2},
+        {SDL_CONTROLLER_BUTTON_DPAD_LEFT, 0x4}, {SDL_CONTROLLER_BUTTON_DPAD_RIGHT, 0x8},
+        {SDL_CONTROLLER_BUTTON_START, 0x10}, {SDL_CONTROLLER_BUTTON_BACK, 0x20},
+        {SDL_CONTROLLER_BUTTON_LEFTSTICK, 0x40}, {SDL_CONTROLLER_BUTTON_RIGHTSTICK, 0x80},
+        {SDL_CONTROLLER_BUTTON_LEFTSHOULDER, 0x100}, {SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, 0x200},
+        {SDL_CONTROLLER_BUTTON_A, 0x1000}, {SDL_CONTROLLER_BUTTON_B, 0x2000},
+        {SDL_CONTROLLER_BUTTON_X, 0x4000}, {SDL_CONTROLLER_BUTTON_Y, 0x8000},
+    };
+    memset(s, 0, sizeof *s);
+    for (unsigned i = 0; i < sizeof map / sizeof map[0]; i++)
+        if (SDL_GameControllerGetButton(p, map[i].b)) s->buttons |= map[i].bit;
+    if (g_nintendo) s->buttons = rt_pad_nintendo(s->buttons);
+    s->lt = (uint8_t)(SDL_GameControllerGetAxis(p, SDL_CONTROLLER_AXIS_TRIGGERLEFT) >> 7);
+    s->rt = (uint8_t)(SDL_GameControllerGetAxis(p, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) >> 7);
+    s->lx = SDL_GameControllerGetAxis(p, SDL_CONTROLLER_AXIS_LEFTX);
+    s->ly = (int16_t)~SDL_GameControllerGetAxis(p, SDL_CONTROLLER_AXIS_LEFTY);
+    s->rx = SDL_GameControllerGetAxis(p, SDL_CONTROLLER_AXIS_RIGHTX);
+    s->ry = (int16_t)~SDL_GameControllerGetAxis(p, SDL_CONTROLLER_AXIS_RIGHTY);
+}
+
 static void fill_state(int idx, uint32_t g) {
-    uint16_t b = 0;
-    uint8_t lt = 0, rt = 0;
-    int16_t lx = 0, ly = 0, rx = 0, ry = 0;
-    SDL_GameController *p = g_pads[idx];
-    if (p) {
-        static const struct { SDL_GameControllerButton b; uint16_t bit; } map[] = {
-            {SDL_CONTROLLER_BUTTON_DPAD_UP, 0x1}, {SDL_CONTROLLER_BUTTON_DPAD_DOWN, 0x2},
-            {SDL_CONTROLLER_BUTTON_DPAD_LEFT, 0x4}, {SDL_CONTROLLER_BUTTON_DPAD_RIGHT, 0x8},
-            {SDL_CONTROLLER_BUTTON_START, 0x10}, {SDL_CONTROLLER_BUTTON_BACK, 0x20},
-            {SDL_CONTROLLER_BUTTON_LEFTSTICK, 0x40}, {SDL_CONTROLLER_BUTTON_RIGHTSTICK, 0x80},
-            {SDL_CONTROLLER_BUTTON_LEFTSHOULDER, 0x100}, {SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, 0x200},
-            {SDL_CONTROLLER_BUTTON_A, 0x1000}, {SDL_CONTROLLER_BUTTON_B, 0x2000},
-            {SDL_CONTROLLER_BUTTON_X, 0x4000}, {SDL_CONTROLLER_BUTTON_Y, 0x8000},
-        };
-        for (unsigned i = 0; i < sizeof map / sizeof map[0]; i++)
-            if (SDL_GameControllerGetButton(p, map[i].b)) b |= map[i].bit;
-        if (g_nintendo)
-            b = (uint16_t)((b & 0x0FFF) | ((b & 0x1000) << 1) | ((b & 0x2000) >> 1) |
-                           ((b & 0x4000) << 1) | ((b & 0x8000) >> 1));
-        lt = (uint8_t)(SDL_GameControllerGetAxis(p, SDL_CONTROLLER_AXIS_TRIGGERLEFT) >> 7);
-        rt = (uint8_t)(SDL_GameControllerGetAxis(p, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) >> 7);
-        lx = SDL_GameControllerGetAxis(p, SDL_CONTROLLER_AXIS_LEFTX);
-        ly = (int16_t)~SDL_GameControllerGetAxis(p, SDL_CONTROLLER_AXIS_LEFTY);
-        rx = SDL_GameControllerGetAxis(p, SDL_CONTROLLER_AXIS_RIGHTX);
-        ry = (int16_t)~SDL_GameControllerGetAxis(p, SDL_CONTROLLER_AXIS_RIGHTY);
-    }
+    RTPadState s = {0};
     if (idx == 0) {
-        b |= g_virt.buttons | skip_tap();
-        if (g_virt.lt) lt = g_virt.lt;
-        if (g_virt.rt) rt = g_virt.rt;
-        if (g_virt.lx || g_virt.ly) { lx = g_virt.lx; ly = g_virt.ly; }
-        if (g_virt.rx || g_virt.ry) { rx = g_virt.rx; ry = g_virt.ry; }
+#ifdef GAME_SKYRIM
+        /* Skyrim reads XInput player 0 only and the port always reports it as
+         * connected (the keyboard and the touch overlay live there). Merge
+         * every pad into that slot: the integrated controls and a docked
+         * controller both drive the game, whichever SDL opened first. */
+        for (int i = 0; i < 4; i++)
+            if (g_pads[i]) {
+                RTPadState one;
+                read_pad(g_pads[i], &one);
+                rt_pad_merge(&s, &one);
+            }
+#else
+        if (g_pads[0]) read_pad(g_pads[0], &s);
+#endif
+        s.buttons |= g_virt.buttons | skip_tap();
+        if (g_virt.lt) s.lt = g_virt.lt;
+        if (g_virt.rt) s.rt = g_virt.rt;
+        if (g_virt.lx || g_virt.ly) { s.lx = g_virt.lx; s.ly = g_virt.ly; }
+        if (g_virt.rx || g_virt.ry) { s.rx = g_virt.rx; s.ry = g_virt.ry; }
+    } else if (idx < 4 && g_pads[idx]) {
+        read_pad(g_pads[idx], &s);
     }
-    { /* a new packet number whenever the reported state changes */
-        static uint16_t last_b[4];
-        if (b != last_b[idx & 3]) { last_b[idx & 3] = b; g_packet++; }
+    {   /* a new packet number whenever the reported state changes */
+        static RTPadState last[4];
+        static int have_last[4];
+        if (!have_last[idx & 3] || !rt_pad_same(&last[idx & 3], &s)) {
+            last[idx & 3] = s;
+            have_last[idx & 3] = 1;
+            g_packet++;
+        }
     }
     M32(g) = g_packet;
-    M16(g + 4) = b;
-    M8(g + 6) = lt;
-    M8(g + 7) = rt;
-    M16(g + 8) = (uint16_t)lx;
-    M16(g + 10) = (uint16_t)ly;
-    M16(g + 12) = (uint16_t)rx;
-    M16(g + 14) = (uint16_t)ry;
+    M16(g + 4) = s.buttons;
+    M8(g + 6) = s.lt;
+    M8(g + 7) = s.rt;
+    M16(g + 8) = (uint16_t)s.lx;
+    M16(g + 10) = (uint16_t)s.ly;
+    M16(g + 12) = (uint16_t)s.rx;
+    M16(g + 14) = (uint16_t)s.ry;
 }
 
 static int connected(uint32_t i) { return i == 0 || (i < 4 && g_pads[i]); }
@@ -136,6 +188,13 @@ static int connected(uint32_t i) { return i == 0 || (i < 4 && g_pads[i]); }
 SHIM(XInputGetState) {
     uint32_t i = ARG(0);
     if (!connected(i)) RET(1167, 2);
+    {   /* says which player slots the game actually reads, and what is there */
+        static uint8_t seen[4];
+        if (i < 4 && !seen[i]) {
+            seen[i] = 1;
+            LOG("input: game reads XInput pad %u (%s)", i, g_pads[i] ? "controller open" : "virtual only");
+        }
+    }
     fill_state((int)i, ARG(1));
     RET(0, 2);
 }

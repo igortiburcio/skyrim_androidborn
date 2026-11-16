@@ -11,6 +11,19 @@ Skyrim Androidborn is a fork of
 [ttom795/Skyrim_Android](https://github.com/ttom795/Skyrim_Android), developed
 independently.
 
+## 1.0.1 — 2026-11-16
+
+Controllers connected next to the handheld's own controls.
+
+### Fixes
+- [Every connected controller now drives the game, not only the first one Android lists — a docked PS4 or 8BitDo pad works alongside the integrated controls] All pads are merged into the player-1 report the game actually reads.
+- [The game notices stick and trigger movement as new input — the camera and movement respond on every supported pad] The XInput packet number changes for any part of the state, not only for buttons.
+- [The log names every controller the game found — a controller report shows which pads were opened] The port lists each joystick and the slot it took at startup.
+
+### Notes
+Tested on a Retroid Pocket G2 (Android 15) with a USB hub and an external
+controller next to the integrated controls: both drive the game.
+
 ## 1.0.0 — 2026-11-14
 
 The first release made to be updated: verified downloads, one-tap reports and
