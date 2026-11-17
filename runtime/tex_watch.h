@@ -54,11 +54,11 @@ inline uint64_t checksum(const uint8_t *p, size_t n) {
     return h;
 }
 
-// The repair is on unless the player turned it off. The Support button's
-// facefix.txt wins over an older nofacefix.txt, so tapping the button always
-// turns it on.
+// The repair is opt-in: it costs work on every texture unlock, so it is off
+// while the player does not need it. The Support tab's Repair character face
+// writes facefix.txt, and nofacefix.txt turns it back off.
 inline bool repair_enabled(bool facefix, bool nofacefix) {
-    return facefix || !nofacefix;
+    return facefix && !nofacefix;
 }
 
 // A one-mip DDS header for a block-compressed level, so the dump opens in any

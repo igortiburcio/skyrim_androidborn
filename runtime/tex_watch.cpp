@@ -130,8 +130,11 @@ void tex_watch_create(void *tex, uint32_t w, uint32_t h, uint32_t fmt, uint32_t 
 
 void tex_watch_unlock(void *tex, uint32_t sub, uint8_t *data, size_t size) {
     if (!tex || sub != 0 || !data) return;
-    if (g_nwatched.load(std::memory_order_relaxed) == 0) return;  // nothing to look at
+    /* This runs on every texture, surface and buffer unlock the game makes, so
+     * the switches are checked before anything else: with both off the whole
+     * watch costs two integer reads. */
     if (!trace_on() && !fix_on()) return;
+    if (g_nwatched.load(std::memory_order_relaxed) == 0) return;  // nothing to look at
     std::lock_guard<std::mutex> l(g_lock);
     auto it = g_watched.find(tex);
     if (it == g_watched.end()) return;

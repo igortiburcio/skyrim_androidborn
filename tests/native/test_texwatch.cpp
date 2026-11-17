@@ -56,12 +56,13 @@ TEST(checksum_is_stable_and_sensitive) {
     CHECK(checksum(a, 4) != checksum(b, 4));
 }
 
-TEST(repair_default) {
-    /* on unless the player turned it off; the Support button wins */
-    CHECK(repair_enabled(false, false));
+TEST(repair_is_opt_in) {
+    /* off until Support -> Repair character face writes facefix.txt */
+    CHECK(!repair_enabled(false, false));
     CHECK(repair_enabled(true, false));
-    CHECK(repair_enabled(true, true));
+    /* a player who turned it off stays off, even with a leftover switch */
     CHECK(!repair_enabled(false, true));
+    CHECK(!repair_enabled(true, true));
 }
 
 TEST(dds_header_fields) {
@@ -96,7 +97,7 @@ int main(void) {
     RUN(level0_size);
     RUN(blank_detection);
     RUN(checksum_is_stable_and_sensitive);
-    RUN(repair_default);
+    RUN(repair_is_opt_in);
     RUN(dds_header_fields);
     return th_report("test_texwatch");
 }

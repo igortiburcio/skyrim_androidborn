@@ -36,7 +36,7 @@ static int read_command(char *cmd, size_t n) {
 void console_cmd_tick(void) {
     static int n;
     char cmd[256];
-    if (++n % 30) return;  /* about once a second at 30 fps */
+    if (++n % 120) return;  /* every four seconds at 30 fps: the folder is on an SD card */
     if (!read_command(cmd, sizeof cmd)) return;
     LOG("consolecmd: typing %s", cmd);
     platform_script_text(cmd);

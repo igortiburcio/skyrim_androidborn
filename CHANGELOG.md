@@ -11,6 +11,20 @@ Skyrim Androidborn is a fork of
 [ttom795/Skyrim_Android](https://github.com/ttom795/Skyrim_Android), developed
 independently.
 
+## 1.1.5 — 2026-11-17
+
+The face repair only costs anything while it is in use.
+
+### Fixes
+- [The face repair is off until Repair character face is tapped — the device stays as cool as before] With it off, the game's texture upload path is untouched; the button turns it on for as long as a face needs fixing.
+- [The debug console check reads the game folder every four seconds instead of every second — no storage stalls while playing] It only runs for the port's test builds.
+
+### Notes
+Tested on a Retroid Pocket G2 (Android 13): Support, save load at 30 fps and the
+tint dump. The heat regression reported on 1.1.0-1.1.4 came from the tint watch
+running on every texture upload; with the repair opt-in, the default path is the
+same as 1.0.1.
+
 ## 1.1.4 — 2026-11-17
 
 The face menu that opened by itself is gone.
