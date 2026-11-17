@@ -8,7 +8,7 @@ Tested on a **Retroid Pocket G2** (Adreno A22, Android 15). Also tested on a
 **Xiaomi 15T** (Mali-G720, Android 15) with the PanVK driver. Mali and
 Immortalis devices need that driver; see the first section.
 
-Current version: **1.0.1** — see [CHANGELOG.md](CHANGELOG.md).
+Current version: **1.1.0** — see [CHANGELOG.md](CHANGELOG.md).
 
 ## Mali and Immortalis GPUs: install the PanVK driver first
 
@@ -149,6 +149,23 @@ that force-stops apps anyway; on the Retroid Pocket G2 it is
 `com.rp.settings`. Exempt Skyrim Androidborn from that cleaner, or keep the
 launcher open while the data downloads.
 
+### The character's face turns dark or brown
+
+Skyrim rebuilds a character's face when their race changes, and after becoming
+a vampire the rebuild can come out without the face colours — the character
+keeps a dark or brown face while the body looks normal. The game does this on
+its own, not because of a mod, and it is the same "dark face" reported for
+modded NPCs.
+
+1. Open **Settings → Support** and tap **Repair character face**. The next
+   launch keeps the last good face colours when the game rebuilds the tint
+   empty, and writes a dump of what the game built; **Export logs** includes
+   that dump.
+2. If the face in a save is already dark, open the console with the keyboard
+   button (`` ` `` on the touch keyboard) and type `player.setrace` followed by
+   the character's race, for example `player.setrace NordRace`. The game
+   rebuilds the face from the character's own data and the colours come back.
+
 ### Mali GPUs
 
 See [Mali and Immortalis GPUs: install the PanVK driver first](#mali-and-immortalis-gpus-install-the-panvk-driver-first).
@@ -187,6 +204,9 @@ Optional switches: create an empty file with one of these names in
 | `prof.txt` | Turns the sampling profiler on (off by default). |
 | `teofis.txt` | Same as the "Disable post-processing" option. |
 | `noasync.txt` | Same as turning off "Asynchronous rendering". |
+| `facefix.txt` | Written by **Support → Repair character face**; it turns the repair on even when `nofacefix.txt` exists. |
+| `nofacefix.txt` | Turns the face-tint repair off (it is on unless this file exists). |
+| `facetrace.txt` | Logs every face tint the game builds and writes a DDS dump to `port/save/texdump` (also written by **Repair character face**). |
 
 ### Building from source
 
@@ -231,6 +251,11 @@ fault on that table, so `--text drop` is only for experiments, together with
 If `gen/` already exists and the game files did not change, the four
 `tools/embed_image.py` calls at the end of `tools/regen_gen.sh` are enough;
 there is no need to rediscover and lift again.
+
+`tools/find_refs.py GAME/TESV_unpacked.exe FaceTint` prints the address of a
+string in the image and every generated function that loads it (for example
+`f_5606F0`, which builds the face-tint path), so `gen/` stays readable after a
+regeneration.
 
 #### 2. Build the APK
 

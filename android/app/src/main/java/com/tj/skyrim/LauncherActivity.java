@@ -25,6 +25,7 @@ import com.tj.skyrim.launcher.CrashReport;
 import com.tj.skyrim.launcher.DisplayModes;
 import com.tj.skyrim.launcher.DriverRegistry;
 import com.tj.skyrim.launcher.DriverSection;
+import com.tj.skyrim.launcher.FaceRepair;
 import com.tj.skyrim.launcher.FolderBrowser;
 import com.tj.skyrim.launcher.FolderCheck;
 import com.tj.skyrim.launcher.GameConfigWriter;
@@ -138,7 +139,11 @@ public class LauncherActivity extends Activity
         pluginsSection = new PluginsSection(widgets, new PluginRegistry(settings));
         driverSection = new DriverSection(widgets, new DriverRegistry(settings), this);
         optionsSection = new OptionsSection(widgets, settings, modes);
-        supportSection = new SupportSection(widgets, this::exportLogs);
+        supportSection = new SupportSection(widgets, new SupportSection.Listener() {
+            @Override public void onExportLogsRequested() { exportLogs(); }
+
+            @Override public void onRepairFaceRequested() { repairFace(); }
+        });
         updateDownloader = new UpdateDownloader(this);
         gameFilesTabs = Arrays.asList(gameFiles);
         settingsTabs = Arrays.asList(optionsSection, driverSection, pluginsSection, supportSection);
@@ -766,6 +771,28 @@ public class LauncherActivity extends Activity
             return;
         }
         verifyThenInstall(apk);
+    }
+
+    /** Writes the face-tint switches for the next launch (Support tab). */
+    private void repairFace() {
+        String folder = settings.folder();
+        if (folder == null || folder.isEmpty()) {
+            supportSection.faceRepairFailed("Choose the Skyrim folder in Game Files first.");
+            return;
+        }
+        File game = new File(folder);
+        if (!game.isDirectory()) {
+            supportSection.faceRepairFailed("The game folder is not there any more. Choose it again.");
+            return;
+        }
+        try {
+            File save = FaceRepair.enable(game);
+            supportSection.faceRepairEnabled(save);
+        } catch (Exception e) {
+            String message = e.getMessage() == null ? "The switches could not be written." : e.getMessage();
+            supportSection.faceRepairFailed(message);
+            saveErrorLog(e);
+        }
     }
 
     /** Writes the log zip in the background and reports the path. */

@@ -6,21 +6,26 @@ import android.widget.TextView;
 import java.io.File;
 
 /**
- * The "Support" tab: one button that writes the log zip a bug report needs.
- * The result line tells the player the exact file to attach, since the folder
- * is on a real SD card and every file manager can see it.
+ * The "Support" tab: one button that writes the log zip a bug report needs and
+ * one that prepares the character-face repair. The result lines tell the player
+ * the exact path or the next step, since the folder is on a real SD card and
+ * every file manager can see it.
  */
 public final class SupportSection implements LauncherWindow.Content {
 
-    /** The activity runs the export (file IO) and reports back. */
+    /** The activity runs the file IO and reports back. */
     public interface Listener {
         void onExportLogsRequested();
+
+        void onRepairFaceRequested();
     }
 
     private final Widgets widgets;
     private final Listener listener;
     private TextView status;
+    private TextView faceStatus;
     private View exportButton;
+    private View repairButton;
 
     public SupportSection(Widgets widgets, Listener listener) {
         this.widgets = widgets;
@@ -47,6 +52,27 @@ public final class SupportSection implements LauncherWindow.Content {
 
         status = widgets.text(pane, "", 13, false);
         status.setTextColor(widgets.hintColor());
+
+        TextView faceTitle = widgets.text(pane, "Character face", 15, true);
+        faceTitle.setTextColor(Widgets.GOLD);
+        faceTitle.setPadding(0, widgets.dp(12), 0, 0);
+
+        widgets.text(pane, "Skyrim can lose the character's face colours (a dark "
+                + "or brown face) after the character becomes a vampire. Repair "
+                + "character face keeps the last good face tint on the next launch "
+                + "and writes a dump of the face texture, so a report shows what "
+                + "the game did.\n\nIf the face is already dark in a save, open the "
+                + "console with the keyboard button and type player.setrace followed "
+                + "by your race, for example: player.setrace NordRace",
+                14, false);
+
+        /* The status sits above the button: the pane scrolls and a line below
+         * the last button ends up off screen. */
+        faceStatus = widgets.text(pane, "", 13, false);
+        faceStatus.setTextColor(widgets.hintColor());
+
+        repairButton = widgets.actionButton(pane, "Repair character face",
+                v -> listener.onRepairFaceRequested());
     }
 
     /** Shows where the zip went. */
@@ -61,6 +87,22 @@ public final class SupportSection implements LauncherWindow.Content {
         if (status == null) return;
         status.setTextColor(widgets.badColor());
         status.setText(message);
+    }
+
+    /** The repair switches are in place for the next launch. */
+    public void faceRepairEnabled(File saveDir) {
+        if (faceStatus == null) return;
+        faceStatus.setTextColor(widgets.okColor());
+        faceStatus.setText("Ready for the next launch. The texture dump goes to "
+                + new File(saveDir, "texdump").getAbsolutePath()
+                + " and is included in Export logs after you play.");
+    }
+
+    /** The repair switches could not be written. */
+    public void faceRepairFailed(String message) {
+        if (faceStatus == null) return;
+        faceStatus.setTextColor(widgets.badColor());
+        faceStatus.setText(message);
     }
 
     @Override

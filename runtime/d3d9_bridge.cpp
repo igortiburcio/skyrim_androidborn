@@ -11,6 +11,9 @@ void shadow_flush(void *obj);
 void shadow_forget(void *obj);
 #include "d3d9_bridge.h"
 void bc_forget(void *obj);
+void tex_watch_forget(void *tex);
+void tex_watch_unlock(void *tex, uint32_t sub, uint8_t *data, size_t size);
+bool tex_watch_active(void);
 bool bc_lock(void *tex, uint32_t sub, uint32_t w, uint32_t h, const RECT *r, DWORD flags, uint32_t out,
              const std::function<HRESULT(D3DLOCKED_RECT *, const RECT *)> &lock, HRESULT *hr);
 bool bc_unlock(void *tex, uint32_t sub);
@@ -92,6 +95,7 @@ static void com_forget(uint32_t g) {
     void *h = g_objs[id];
     shadow_forget(h);
     bc_forget(h);
+    tex_watch_forget(h);
     g_host_to_guest.erase(h);
     g_objs[id].store(nullptr, std::memory_order_release);
     g_free_ids.push_back(id);
@@ -409,8 +413,7 @@ void B_IDirect3DDevice9_Reset(CPU *c) {
 int g_d3d_trace;
 static int g_frame, g_trace_from = -1, g_trace_to = -1;
 
-void d3d_trace(CPU *c, const char *name, int nargs) {
-    fprintf(stderr, "D3D %d %s", g_frame, name);
+void d3d_trace(CPU *c, const char *name, int nargs) {    fprintf(stderr, "D3D %d %s", g_frame, name);
     for (int i = 1; i <= nargs; i++) fprintf(stderr, " %x", ARG(i));
     if (strstr(name, "ConstantF") && ARG(2))
         for (uint32_t i = 0; i < ARG(3) * 4 && i < 64; i++)
@@ -547,7 +550,7 @@ void B_IDirect3DDevice9_UpdateSurface(CPU *c) {
 // Guest code cannot address host memory, so every lock hands the guest a
 // shadow copy in guest memory and copies it back on unlock.
 namespace {
-struct Shadow { uint32_t guest; void *host; size_t size; DWORD flags; bool persist; pthread_t th; };
+struct Shadow { uint32_t guest; void *host; size_t size; DWORD flags; bool persist; pthread_t th; void *owner; };
 // A resource can be locked several times at once (nested locks of buffer
 // ranges, or locks from several threads): every lock keeps its own shadow,
 // and an unlock ends the newest one taken by the same thread.
@@ -562,7 +565,7 @@ struct Persist { uint32_t guest; size_t size; std::function<void(const uint8_t *
 std::map<std::pair<void *, uint32_t>, Persist> g_persist;
 
 uint32_t shadow_begin(void *obj, uint32_t sub, void *hostbits, size_t size, DWORD flags,
-                      std::function<void(const uint8_t *)> upload = nullptr) {
+                      std::function<void(const uint8_t *)> upload = nullptr, void *owner = nullptr) {
     uint32_t g = 0;
     bool persist = upload != nullptr;
     std::lock_guard<std::mutex> l(g_shadow_lock);
@@ -582,7 +585,7 @@ uint32_t shadow_begin(void *obj, uint32_t sub, void *hostbits, size_t size, DWOR
         if (!g) rt_fatal("out of guest memory for a %zu byte lock", size);
         if (!(flags & D3DLOCK_DISCARD)) memcpy(MEM + g, hostbits, size);
     }
-    g_shadows[{obj, sub}].push_back(Shadow{g, hostbits, size, flags, persist, pthread_self()});
+    g_shadows[{obj, sub}].push_back(Shadow{g, hostbits, size, flags, persist, pthread_self(), owner ? owner : obj});
     return g;
 }
 
@@ -601,6 +604,7 @@ bool shadow_end(void *obj, uint32_t sub) {
         if (v.empty()) g_shadows.erase(it);
     }
     if (!(s.flags & D3DLOCK_READONLY)) memcpy(s.host, MEM + s.guest, s.size);
+    if (!(s.flags & D3DLOCK_READONLY)) tex_watch_unlock(s.owner, sub, (uint8_t *)s.host, s.size);
     if (!s.persist) gfree(s.guest);
     return true;
 }
@@ -695,13 +699,25 @@ size_t rect_bytes(const D3DSURFACE_DESC &desc, const RECT *r, INT pitch) {
 
 void lock_rect_common(CPU *c, void *obj, uint32_t sub, const D3DSURFACE_DESC &desc, HRESULT hr,
                       const D3DLOCKED_RECT &lr, const RECT *r, DWORD flags, uint32_t out,
-                      std::function<void(const uint8_t *)> upload = nullptr) {
+                      std::function<void(const uint8_t *)> upload = nullptr, void *owner = nullptr) {
     if (FAILED(hr)) { M32(out) = 0; M32(out + 4) = 0; return; }
     if (desc.Pool != D3DPOOL_SYSTEMMEM || r) upload = nullptr;
-    uint32_t g = shadow_begin(obj, sub, lr.pBits, rect_bytes(desc, r, lr.Pitch), flags, upload);
+    uint32_t g = shadow_begin(obj, sub, lr.pBits, rect_bytes(desc, r, lr.Pitch), flags, upload, owner);
     M32(out) = (uint32_t)lr.Pitch;
     M32(out + 4) = g;
 }
+}
+
+// The texture that owns a level surface, so a lock through the surface reaches
+// the tint watch keyed by the texture. Released again: the watch only keeps
+// the pointer for the duration of the lock, and a level surface's container
+// outlives it.
+static void *surface_owner(IDirect3DSurface9 *s) {
+    if (!tex_watch_active()) return s;
+    IDirect3DBaseTexture9 *tex = nullptr;
+    if (FAILED(s->GetContainer(__uuidof(IDirect3DTexture9), (void **)&tex)) || !tex) return s;
+    tex->Release();
+    return tex;
 }
 
 void B_IDirect3DSurface9_LockRect(CPU *c) {
@@ -723,7 +739,7 @@ void B_IDirect3DSurface9_LockRect(CPU *c) {
             memcpy(l2.pBits, src, bytes);
             s->UnlockRect();
         }
-    });
+    }, surface_owner(s));
     RET(hr, 4);
 }
 

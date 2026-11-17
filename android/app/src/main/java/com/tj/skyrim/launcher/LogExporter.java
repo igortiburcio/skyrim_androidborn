@@ -49,6 +49,7 @@ public final class LogExporter {
             add(zip, new File(port, "dxvk.conf"), "dxvk.conf");
             File plugins = pluginsFile(folder);
             if (plugins != null) add(zip, plugins, "Plugins.txt");
+            for (File dump : faceDumps(folder)) add(zip, dump, "texdump/" + dump.getName());
             zip.putNextEntry(new ZipEntry("device.txt"));
             zip.write(CrashReport.describe(context).getBytes("UTF-8"));
             zip.closeEntry();
@@ -83,6 +84,19 @@ public final class LogExporter {
             if (file.isFile() && file.getName().equalsIgnoreCase("Plugins.txt")) return file;
         }
         return null;
+    }
+
+    /** Face tint dumps written by the runtime (empty unless the trace switch is on). */
+    static java.util.List<File> faceDumps(String folder) {
+        java.util.List<File> out = new java.util.ArrayList<>();
+        File dir = new File(new File(folder, "port/save"), "texdump");
+        File[] files = dir.listFiles();
+        if (files == null) return out;
+        Arrays.sort(files, Comparator.comparing(File::getName));
+        for (File file : files) {
+            if (file.isFile() && file.getName().endsWith(".dds")) out.add(file);
+        }
+        return out;
     }
 
     private static void prune(File port) {

@@ -12,6 +12,9 @@
 #include <mutex>
 #include <tuple>
 
+void tex_watch_create(void *tex, uint32_t w, uint32_t h, uint32_t fmt, uint32_t pool, uint32_t levels);
+void tex_watch_unlock(void *tex, uint32_t sub, uint8_t *data, size_t size);
+
 namespace {
 bool g_decided, g_emulate;
 std::mutex g_bc_lock;
@@ -108,6 +111,7 @@ void B_IDirect3DDevice9_CreateTexture(CPU *c) {
     HRESULT hr = d->CreateTexture(ARG(1), ARG(2), ARG(3), ARG(4), emu ? D3DFMT_A8R8G8B8 : fmt,
                                   (D3DPOOL)ARG(6), &t, nullptr);
     tex_census("CreateTexture", ARG(1), ARG(2), ARG(3), ARG(4), fmt, ARG(6), hr);
+    if (SUCCEEDED(hr)) tex_watch_create(t, ARG(1), ARG(2), fmt, ARG(6), ARG(3));
     if (SUCCEEDED(hr) && emu) {
         std::lock_guard<std::mutex> l(g_bc_lock);
         g_tex[t] = BcTex{fmt};
@@ -241,6 +245,10 @@ bool bc_unlock(void *tex, uint32_t sub) {
     auto key = std::make_pair(tex, sub);
     auto lk = g_locks.find(key);
     if (lk == g_locks.end()) return true;
+    auto lv = g_levels.find(key);
+    if (lv != g_levels.end())
+        tex_watch_unlock(tex, sub & 0xFFFFu, MEM + lv->second.guest,
+                         (size_t)lv->second.pitch * lv->second.rows);
     decode_rect(f, g_levels[key], lk->second.r, lk->second.host, lk->second.host_pitch);
     g_locks.erase(lk);
     return true;

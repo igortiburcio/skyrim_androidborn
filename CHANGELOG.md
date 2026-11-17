@@ -11,6 +11,24 @@ Skyrim Androidborn is a fork of
 [ttom795/Skyrim_Android](https://github.com/ttom795/Skyrim_Android), developed
 independently.
 
+## 1.1.0 — 2026-11-17
+
+The character's face keeps its colours when the game rebuilds it.
+
+### Fixes
+- [A rebuilt face keeps the colours it had — no dark or brown face after the character becomes a vampire] When the game rewrites the face tint empty, the port puts the last good colours back instead of showing a skinless face.
+- [Repair character face in the Support tab — the fix is one tap away and the report carries the face itself] The button turns the repair on explicitly and writes a DDS dump of the tint the game built.
+- [Face tint dumps travel in the log zip — a report shows what the game wrote instead of describing it] Export logs now includes `port/save/texdump`.
+- [The console workaround is written down — a save that is already dark can be fixed without waiting for a patch] The README and the Support tab show `player.setrace` for the character's own race.
+
+### Notes
+Tested on a Retroid Pocket G2 (Android 13): install over 1.0.1, launcher,
+Support → Repair character face (the switches land in the game folder on the
+SD card), save load at 30 fps, and the tint dump (one sample per size in
+`port/save/texdump`). A healthy save writes the tint with content, so the
+repair stays out of the way. The vampirism case still needs a report from a
+save that shows it: attach the log and the dumps with **Export logs**.
+
 ## 1.0.1 — 2026-11-16
 
 Controllers connected next to the handheld's own controls.
