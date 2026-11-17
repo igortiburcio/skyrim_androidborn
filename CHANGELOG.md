@@ -11,6 +11,19 @@ Skyrim Androidborn is a fork of
 [ttom795/Skyrim_Android](https://github.com/ttom795/Skyrim_Android), developed
 independently.
 
+## 1.1.4 — 2026-11-17
+
+The face menu that opened by itself is gone.
+
+### Fixes
+- [Repair character face no longer opens the race menu — nothing pops up while you play] The button keeps the automatic repair and the texture dump only.
+- [The console steps use player.setrace again — a save that is already dark is fixed in a few seconds] The README and the Support tab name the race to type and say to keep any Vampire in the name.
+
+### Notes
+Tested on a Retroid Pocket G2 (Android 13): Support, save load at 30 fps and the
+tint dump. The 1.1.3 menu trigger is removed; the automatic tint repair and the
+dump are unchanged.
+
 ## 1.1.3 — 2026-11-17
 
 A save that is already dark gets its head rebuilt.

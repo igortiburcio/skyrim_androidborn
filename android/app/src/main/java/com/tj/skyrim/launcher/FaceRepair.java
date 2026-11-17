@@ -13,10 +13,8 @@ import java.io.IOException;
  * ({@code facefix.txt}) and writes a DDS dump of what the game built
  * ({@code facetrace.txt}), so a report can show which of the two failed.
  *
- * <p>All three switches live in the game's {@code port/save} folder, next to
- * the other port options, and are read when the game starts or when a save is
- * loaded. The rebuild switch is removed by the game once the menu has been
- * asked for, so it never repeats.
+ * <p>Both switches live in the game's {@code port/save} folder, next to the
+ * other port options, and are read when the game starts.
  */
 public final class FaceRepair {
 
@@ -24,8 +22,6 @@ public final class FaceRepair {
     public static final String FIX_SWITCH = "facefix.txt";
     /** The switch that logs and dumps every face tint the game builds. */
     public static final String TRACE_SWITCH = "facetrace.txt";
-    /** The switch that rebuilds the head once, through the game's race menu. */
-    public static final String REBUILD_SWITCH = "facerebuild.txt";
 
     private FaceRepair() {
     }
@@ -43,7 +39,6 @@ public final class FaceRepair {
         }
         write(new File(save, FIX_SWITCH));
         write(new File(save, TRACE_SWITCH));
-        write(new File(save, REBUILD_SWITCH));
         return save;
     }
 

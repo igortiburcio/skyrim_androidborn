@@ -35,7 +35,6 @@ std::map<void *, Watch> g_watched;
 std::atomic<int> g_nwatched{0};
 size_t g_good_bytes, g_dump_bytes;
 int g_trace = -1, g_fix = -1, g_dumps;
-std::atomic<int> g_creates{0};
 
 // Snapshot bytes kept for the repair; enough for a few faces, never for the
 // whole game's heads.
@@ -108,9 +107,6 @@ void dump(const Watch &w, const uint8_t *data, size_t size, uint64_t sum) {
 
 void tex_watch_create(void *tex, uint32_t w, uint32_t h, uint32_t fmt, uint32_t pool, uint32_t levels) {
     if (!tex || !texwatch::is_face_tint(w, h, fmt, pool, levels)) return;
-    /* Counted even with both switches off: face_rebuild.c uses a change here
-     * to tell that the race menu rebuilt the head. */
-    g_creates.fetch_add(1, std::memory_order_relaxed);
     if (!trace_on() && !fix_on()) return;
     {
         std::lock_guard<std::mutex> l(g_lock);
@@ -189,10 +185,4 @@ void tex_watch_forget(void *tex) {
 // Cheap check for the lock path: no face tint has been created yet.
 bool tex_watch_active(void) {
     return g_nwatched.load(std::memory_order_relaxed) != 0;
-}
-
-/* How many face tints have been built so far: face_rebuild.c uses a change
- * here as the sign that the race menu did rebuild the head. */
-extern "C" int tex_watch_creates(void) {
-    return g_creates.load(std::memory_order_relaxed);
 }

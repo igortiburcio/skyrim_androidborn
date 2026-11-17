@@ -205,8 +205,7 @@ static void type_char(unsigned ch) {
         if (ch == (unsigned char)sym[i].c) { type_key(sym[i].sc, sym[i].s); return; }
 }
 /* Typed text for the phone keyboard: each character becomes a short scripted
- * key press. Also used by face_rebuild.c to ask the console for a command
- * without a human at the keyboard. */
+ * key press. console_cmd.c uses it to type a console command for debugging. */
 void platform_script_text(const char *s) {
     type_key(SDL_SCANCODE_GRAVE, 0);  /* open the console */
     g_text_next += 20;                /* let it come up before the command */
@@ -323,7 +322,6 @@ void platform_present_hook(void) {
         touch_handle_event(&e);
     }
     script_events();
-    face_rebuild_tick();
     console_cmd_tick();
 #ifdef __ANDROID__
     /* closed with the phone's Back key or its own button: follow it */

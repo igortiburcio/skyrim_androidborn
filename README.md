@@ -8,7 +8,7 @@ Tested on a **Retroid Pocket G2** (Adreno A22, Android 15). Also tested on a
 **Xiaomi 15T** (Mali-G720, Android 15) with the PanVK driver. Mali and
 Immortalis devices need that driver; see the first section.
 
-Current version: **1.1.3** — see [CHANGELOG.md](CHANGELOG.md).
+Current version: **1.1.4** — see [CHANGELOG.md](CHANGELOG.md).
 
 ## Mali and Immortalis GPUs: install the PanVK driver first
 
@@ -160,14 +160,11 @@ modded NPCs.
 1. The port keeps the last good face colours on its own when the game
    rebuilds the tint empty. **Settings → Support → Repair character face** also
    writes a dump of what the game built; **Export logs** includes that dump.
-2. If the face in a save is already dark, the head has to be rebuilt once:
-   tap **Repair character face** and load that save. About a minute after the
-   world is up the game's race menu opens by itself; confirm it **without
-   changing the race** and the head is rebuilt from your character's own data.
-   Nothing is typed and the race (and vampirism) is not changed. Loading a save
-   from before the change also works, and so does curing vampirism (Falion in
-   Morthal). The Face Sculptor does not serve vampires, and `player.setrace`
-   does nothing while the character is already the vampire race.
+2. If the face in a save is already dark, open the console with the keyboard
+   button (`` ` ``), type `player.setrace` followed by the character's race and
+   keep any `Vampire` in the name — for example `player.setrace
+   NordRaceVampire` — then save. The game rebuilds the head from the
+   character's own data. Loading a save from before the change also works.
 
 ### Mali GPUs
 
@@ -210,7 +207,6 @@ Optional switches: create an empty file with one of these names in
 | `facefix.txt` | Written by **Support → Repair character face**; it turns the repair on even when `nofacefix.txt` exists. |
 | `nofacefix.txt` | Turns the face-tint repair off (it is on unless this file exists). |
 | `facetrace.txt` | Logs every face tint the game builds and writes a DDS dump to `port/save/texdump` (also written by **Repair character face**). |
-| `facerebuild.txt` | Written by **Repair character face**: opens the game's race menu once after the next save is loaded, so the head is rebuilt. Removed after it is used. |
 
 ### Building from source
 

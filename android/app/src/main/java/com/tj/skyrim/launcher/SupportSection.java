@@ -61,12 +61,11 @@ public final class SupportSection implements LauncherWindow.Content {
                 + "or brown face) after the character becomes a vampire. The port "
                 + "keeps the last good colours when the game rebuilds the face, and "
                 + "Repair character face also writes a dump of the texture for a "
-                + "report.\n\nRepair character face opens the game's race menu once, "
-                + "about a minute after the next save is loaded. Confirm it without "
-                + "changing the race: the head is rebuilt from your character's own "
-                + "data and the colours come back. Nothing is typed and the race "
-                + "(and vampirism) is not changed. To skip the menu, load a save "
-                + "from before the face changed instead.",
+                + "report.\n\nIf a save is already dark, open the console with the "
+                + "keyboard button and type player.setrace followed by the "
+                + "character's race, keeping any Vampire in the name (for example "
+                + "player.setrace NordRaceVampire). The game rebuilds the head from "
+                + "your character's data; save afterwards.",
                 14, false);
 
         /* The status sits above the button: the pane scrolls and a line below
