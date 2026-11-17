@@ -59,14 +59,13 @@ public final class SupportSection implements LauncherWindow.Content {
 
         widgets.text(pane, "Skyrim can lose the character's face colours (a dark "
                 + "or brown face) after the character becomes a vampire. The port "
-                + "keeps the last good face colours and Repair character face also "
-                + "writes a dump of the face texture, so a report shows what the "
-                + "game did.\n\nIf the face in a save is already dark, make the game "
-                + "rebuild it: visit the Face Sculptor in the Ragged Flagon "
-                + "(Dawnguard) and change anything, or open the console with the "
-                + "keyboard button, type player.getrace, and then player.setrace "
-                + "with exactly that name. Keep any Vampire in the name: entering "
-                + "the plain race cures vampirism.",
+                + "keeps the last good colours when the game rebuilds the face, and "
+                + "Repair character face also writes a dump of the texture, so a "
+                + "report shows what the game did.\n\nIf a save already has the dark "
+                + "face, the game has to rebuild the head once: load a save from "
+                + "before it changed, or cure vampirism in Morthal. The Face "
+                + "Sculptor does not serve vampires, and player.setrace does "
+                + "nothing while the character is already the vampire race.",
                 14, false);
 
         /* The status sits above the button: the pane scrolls and a line below

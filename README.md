@@ -8,7 +8,7 @@ Tested on a **Retroid Pocket G2** (Adreno A22, Android 15). Also tested on a
 **Xiaomi 15T** (Mali-G720, Android 15) with the PanVK driver. Mali and
 Immortalis devices need that driver; see the first section.
 
-Current version: **1.1.1** — see [CHANGELOG.md](CHANGELOG.md).
+Current version: **1.1.2** — see [CHANGELOG.md](CHANGELOG.md).
 
 ## Mali and Immortalis GPUs: install the PanVK driver first
 
@@ -160,12 +160,11 @@ modded NPCs.
 1. The port keeps the last good face colours on its own when the game
    rebuilds the tint empty. **Settings → Support → Repair character face** also
    writes a dump of what the game built; **Export logs** includes that dump.
-2. If the face in a save is already dark, make the game rebuild it: visit the
-   **Face Sculptor** in the Ragged Flagon (Dawnguard) and change anything, or
-   open the console with the keyboard button (`` ` `` on the touch keyboard),
-   type `player.getrace`, then `player.setrace` with exactly that name. Keep any
-   `Vampire` in the name — entering the plain race cures vampirism. The game
-   rebuilds the face from the character's own data and the colours come back.
+2. If the face in a save is already dark, the game has to rebuild the head
+   once: load a save from before it changed, or cure vampirism (Falion in
+   Morthal) and let the face come back. The Face Sculptor does not serve
+   vampires, and `player.setrace` does nothing while the character is already
+   the vampire race.
 
 ### Mali GPUs
 

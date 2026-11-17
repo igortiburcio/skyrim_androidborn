@@ -11,6 +11,17 @@ Skyrim Androidborn is a fork of
 [ttom795/Skyrim_Android](https://github.com/ttom795/Skyrim_Android), developed
 independently.
 
+## 1.1.2 — 2026-11-17
+
+The face repair's steps only name what actually works.
+
+### Fixes
+- [Support no longer sends vampires to commands that do nothing — the save fix is the one that works] The steps say to load an older save or cure vampirism, and why `player.setrace` and the Face Sculptor cannot do it.
+
+### Notes
+Tested on a Retroid Pocket G2 (Android 13): the Support tab shows the new
+steps. No game code changed in this build; 1.1.0 carries the face fix.
+
 ## 1.1.1 — 2026-11-17
 
 The face repair's instructions name the character's own race.
