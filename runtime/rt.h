@@ -83,4 +83,9 @@ extern char g_save_dir[1024];
 /* Map a Windows path to a host path, resolving case-insensitively. */
 int rt_host_path(const char *win, char *out, size_t outsz);
 
+/* One-shot face rebuild (1.1.3): a save was opened for reading, and one tick
+ * per presented frame. */
+void face_rebuild_save_opened(void);
+void face_rebuild_tick(void);
+
 void rt_init_shims(void);

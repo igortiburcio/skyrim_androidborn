@@ -204,6 +204,25 @@ static void type_char(unsigned ch) {
     for (unsigned i = 0; i < sizeof sym / sizeof sym[0]; i++)
         if (ch == (unsigned char)sym[i].c) { type_key(sym[i].sc, sym[i].s); return; }
 }
+/* Typed text for the phone keyboard: each character becomes a short scripted
+ * key press. Also used by face_rebuild.c to ask the console for a command
+ * without a human at the keyboard. */
+void platform_script_text(const char *s) {
+    type_key(SDL_SCANCODE_GRAVE, 0);  /* open the console */
+    g_text_next += 20;                /* let it come up before the command */
+    for (const unsigned char *p = (const unsigned char *)s; *p; p++)
+        if (*p < 0x80) {
+            type_char(*p);
+            g_text_next += 2;
+        }
+    type_char('\n');
+    /* The console keeps the keyboard while it is open (it draws over menus and
+     * swallows their keys), so close it once the command has run. */
+    g_text_next += 20;
+    type_key(SDL_SCANCODE_GRAVE, 0);
+    LOG("script: typed %s", s);
+}
+
 /* While the phone keyboard is up: characters arrive as SDL_TEXTINPUT (the
  * key events SDL makes up for them are pressed and released at once, too
  * fast for DirectInput polling), Backspace and Enter as key presses. Returns
@@ -304,6 +323,7 @@ void platform_present_hook(void) {
         touch_handle_event(&e);
     }
     script_events();
+    face_rebuild_tick();
 #ifdef __ANDROID__
     /* closed with the phone's Back key or its own button: follow it */
     if (g_text_on) {

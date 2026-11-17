@@ -11,6 +11,22 @@ Skyrim Androidborn is a fork of
 [ttom795/Skyrim_Android](https://github.com/ttom795/Skyrim_Android), developed
 independently.
 
+## 1.1.3 — 2026-11-17
+
+A save that is already dark gets its head rebuilt.
+
+### Fixes
+- [Repair character face rebuilds the head in the game's race menu — a save that is already dark is fixed without curing vampirism] The menu opens once about a minute after the save loads; confirm it unchanged and the colours come back.
+- [The race menu is asked for once and then stops — nothing pops up on later loads] The switch file is removed as soon as the menu is requested.
+- [The Support text names only what works — no console commands for a vampire] The steps point to the one-tap rebuild, an older save, or a cure.
+
+### Notes
+Tested on a Retroid Pocket G2 (Android 13): Repair character face arms the
+rebuild, the save loads, and the race menu opens by itself with the character's
+own race selected (the log shows the console command and the rebuilt face
+tints); leaving it without changes keeps the character. A dark save from a
+vampire was not available for this test, so the reporter was asked to try it.
+
 ## 1.1.2 — 2026-11-17
 
 The face repair's steps only name what actually works.

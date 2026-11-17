@@ -931,6 +931,16 @@ SHIM(CreateFileA) {
     f->fd = fd;
     f->shared = bsa;
     snprintf(f->path, sizeof f->path, "%s", host);
+    /* A save opened in place is a load: the one-shot face rebuild (Support ->
+     * Repair character face) starts its wait here. A new save opens with
+     * CREATE_ALWAYS/OPEN_ALWAYS and does not arm it. */
+    if (fd >= 0 && (fl & O_ACCMODE) != O_WRONLY) {
+        const char *x = strrchr(host, '.');
+        if (x && !strcasecmp(x, ".ess") && (disp == 3 || (fl & O_ACCMODE) == O_RDONLY)) {
+            LOG("save: opened %s (disposition %u)", strrchr(host, '/') + 1, disp);
+            face_rebuild_save_opened();
+        }
+    }
     rt_set_last_error(c, exists && (disp == 2 || disp == 4) ? ERROR_ALREADY_EXISTS : 0);
     RET(h_new(H_FILE, f), 7);
 }
