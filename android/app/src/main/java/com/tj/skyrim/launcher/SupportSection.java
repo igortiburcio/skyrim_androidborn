@@ -62,11 +62,13 @@ public final class SupportSection implements LauncherWindow.Content {
                 + "keeps the last good colours when the game rebuilds the face, and "
                 + "Repair character face also writes a dump of the texture for a "
                 + "report.\n\nIf a save is already dark, Repair character face also "
-                + "opens the game's race menu after the next load. Confirm it with X "
-                + "without changing the race: the head is rebuilt from your "
-                + "character's own data. Leave it on while a save needs it; every "
-                + "load asks for the menu again. If the menu does not answer, close "
-                + "the console first with the keyboard button.",
+                + "opens the game's race menu once, after the next load. Confirm it "
+                + "with X without changing the race and then save: the head is "
+                + "rebuilt from your character's own data and the button switches "
+                + "itself off. Tap it again if the face comes back dark. Continue "
+                + "loads the newest save in the folder, so save before using it. If "
+                + "the menu does not answer, close the console first with the "
+                + "keyboard button.",
                 14, false);
 
         /* The status sits above the button: the pane scrolls and a line below

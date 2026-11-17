@@ -11,6 +11,21 @@ Skyrim Androidborn is a fork of
 [ttom795/Skyrim_Android](https://github.com/ttom795/Skyrim_Android), developed
 independently.
 
+## 1.1.7 — 2026-11-17
+
+The race-menu rebuild is one shot, and the log says which save a load opened.
+
+### Fixes
+- [Repair character face opens the race menu once and switches itself off — the menu stops appearing on later loads] Confirm it with X without changing the race, then save; tap it again if the face comes back dark.
+- [The log names the save file and its time — "Continue" picking a different save is visible] Every load records which `.ess` it opened and when that file was written.
+
+### Notes
+The reporter found that loading a save by hand fixed the face while "Continue"
+did not. Continue loads the newest save on disk, so a stale autosave can win;
+the log now names and dates the file so a report shows it. Tested on a Retroid
+Pocket G2 (Android 13): menu opens once after a load, switch removed at the
+same moment.
+
 ## 1.1.6 — 2026-11-17
 
 The race-menu rebuild is back and stays on for every load.

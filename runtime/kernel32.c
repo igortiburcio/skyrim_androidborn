@@ -933,11 +933,20 @@ SHIM(CreateFileA) {
     snprintf(f->path, sizeof f->path, "%s", host);
     /* A save opened in place is a load: the one-shot face rebuild (Support ->
      * Repair character face) starts its wait here. A new save opens with
-     * CREATE_ALWAYS/OPEN_ALWAYS and does not arm it. */
+     * CREATE_ALWAYS/OPEN_ALWAYS and does not arm it. The file time goes in the
+     * log because "Continue" loads the newest save on disk, which is how a
+     * report shows which file a load actually opened. */
     if (fd >= 0 && (fl & O_ACCMODE) != O_WRONLY) {
         const char *x = strrchr(host, '.');
         if (x && !strcasecmp(x, ".ess") && (disp == 3 || (fl & O_ACCMODE) == O_RDONLY)) {
-            LOG("save: opened %s (disposition %u)", strrchr(host, '/') + 1, disp);
+            struct stat st;
+            char when[32] = "?";
+            if (!stat(host, &st)) {
+                struct tm tm;
+                localtime_r(&st.st_mtime, &tm);
+                strftime(when, sizeof when, "%Y-%m-%d %H:%M:%S", &tm);
+            }
+            LOG("save: opened %s (%s, disposition %u)", strrchr(host, '/') + 1, when, disp);
             face_rebuild_save_opened();
         }
     }
