@@ -11,6 +11,17 @@ Skyrim Androidborn is a fork of
 [ttom795/Skyrim_Android](https://github.com/ttom795/Skyrim_Android), developed
 independently.
 
+## 1.1.1 — 2026-11-17
+
+The face repair's instructions name the character's own race.
+
+### Fixes
+- [Support asks for the character's own race before changing it — the console fix can no longer cure vampirism] The text says to run `player.getrace` first and to keep any `Vampire` in the name, and points to the Face Sculptor as the in-game way.
+
+### Notes
+Tested on a Retroid Pocket G2 (Android 13): the Support tab shows the new
+steps. No game code changed in this build; 1.1.0 carries the face fix.
+
 ## 1.1.0 — 2026-11-17
 
 The character's face keeps its colours when the game rebuilds it.
