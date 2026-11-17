@@ -83,6 +83,11 @@ extern char g_save_dir[1024];
 /* Map a Windows path to a host path, resolving case-insensitively. */
 int rt_host_path(const char *win, char *out, size_t outsz);
 
+/* Face rebuild through the race menu (face_rebuild.c): a save was opened for
+ * reading, and one tick per presented frame. */
+void face_rebuild_save_opened(void);
+void face_rebuild_tick(void);
+
 /* Development only: types the console command in <save>/console.txt while the
  * game runs (console_cmd.c). */
 void console_cmd_tick(void);

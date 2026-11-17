@@ -24,6 +24,7 @@ public class FaceRepairTest {
         assertEquals(new File(game, "port/save"), save);
         assertTrue(new File(save, FaceRepair.FIX_SWITCH).isFile());
         assertTrue(new File(save, FaceRepair.TRACE_SWITCH).isFile());
+        assertTrue(new File(save, FaceRepair.REBUILD_SWITCH).isFile());
         assertTrue(FaceRepair.enabled(game));
     }
 

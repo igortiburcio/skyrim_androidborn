@@ -938,6 +938,7 @@ SHIM(CreateFileA) {
         const char *x = strrchr(host, '.');
         if (x && !strcasecmp(x, ".ess") && (disp == 3 || (fl & O_ACCMODE) == O_RDONLY)) {
             LOG("save: opened %s (disposition %u)", strrchr(host, '/') + 1, disp);
+            face_rebuild_save_opened();
         }
     }
     rt_set_last_error(c, exists && (disp == 2 || disp == 4) ? ERROR_ALREADY_EXISTS : 0);

@@ -8,7 +8,7 @@ Tested on a **Retroid Pocket G2** (Adreno A22, Android 15). Also tested on a
 **Xiaomi 15T** (Mali-G720, Android 15) with the PanVK driver. Mali and
 Immortalis devices need that driver; see the first section.
 
-Current version: **1.1.5** — see [CHANGELOG.md](CHANGELOG.md).
+Current version: **1.1.6** — see [CHANGELOG.md](CHANGELOG.md).
 
 ## Mali and Immortalis GPUs: install the PanVK driver first
 
@@ -162,11 +162,12 @@ modded NPCs.
    game built; **Export logs** includes that dump. Leave it on while the face
    is still misbehaving; the repair costs a little work on every texture the
    game uploads, so it is off until you ask for it.
-2. If the face in a save is already dark, open the console with the keyboard
-   button (`` ` ``), type `player.setrace` followed by the character's race and
-   keep any `Vampire` in the name — for example `player.setrace
-   NordRaceVampire` — then save. The game rebuilds the head from the
-   character's own data. Loading a save from before the change also works.
+2. If the face in a save is already dark, **Repair character face** also opens
+   the game's race menu after the next load (it stays on for every load while
+   the switch is there). Confirm the menu with X **without changing the race**
+   and the head is rebuilt from the character's own data. If the menu does not
+   answer, the console may still be open: close it with the keyboard button
+   first. Loading a save from before the change also works.
 
 ### Mali GPUs
 
@@ -208,6 +209,7 @@ Optional switches: create an empty file with one of these names in
 | `noasync.txt` | Same as turning off "Asynchronous rendering". |
 | `facefix.txt` | Same as **Support → Repair character face**: keeps the last good face tint when the game rebuilds it empty (off until then). |
 | `nofacefix.txt` | Turns the face-tint repair off again. |
+| `facerebuild.txt` | Written by **Repair character face**: asks the game for the race menu after every save load, so a dark head is rebuilt. `nofacerebuild.txt` turns it off. |
 | `facetrace.txt` | Logs every face tint the game builds and writes a DDS dump to `port/save/texdump` (also written by **Repair character face**). |
 
 ### Building from source

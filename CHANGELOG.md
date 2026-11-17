@@ -11,6 +11,18 @@ Skyrim Androidborn is a fork of
 [ttom795/Skyrim_Android](https://github.com/ttom795/Skyrim_Android), developed
 independently.
 
+## 1.1.6 — 2026-11-17
+
+The race-menu rebuild is back and stays on for every load.
+
+### Fixes
+- [Repair character face opens the race menu again — a save that is already dark gets its head rebuilt] Confirm it with X without changing the race; the button also writes the face-tint dump.
+- [The rebuild now runs on every load while it is on — a save that only looks right until the game restarts stays fixed] The switch is no longer consumed after the first menu; remove `port/save/facerebuild.txt` or create `nofacerebuild.txt` to stop it.
+- [The Support text says how to leave the menu — no stuck character] It names the X button and says to close the console first if the menu does not answer.
+
+### Notes
+Reported by the reporter who tested 1.1.3: the menu rebuild fixed the face (99%), X did not confirm the menu, and loading through "Continue" showed the dark face again because the switch had already been used. This build fixes both. Tested on a Retroid Pocket G2 (Android 13): the menu opens after a save load with the character's own race selected.
+
 ## 1.1.5 — 2026-11-17
 
 The face repair only costs anything while it is in use.
