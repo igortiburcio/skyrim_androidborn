@@ -324,6 +324,7 @@ void platform_present_hook(void) {
     }
     script_events();
     face_rebuild_tick();
+    console_cmd_tick();
 #ifdef __ANDROID__
     /* closed with the phone's Back key or its own button: follow it */
     if (g_text_on) {

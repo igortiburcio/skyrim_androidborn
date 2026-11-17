@@ -88,4 +88,8 @@ int rt_host_path(const char *win, char *out, size_t outsz);
 void face_rebuild_save_opened(void);
 void face_rebuild_tick(void);
 
+/* Development only: types the console command in <save>/console.txt while the
+ * game runs (console_cmd.c). */
+void console_cmd_tick(void);
+
 void rt_init_shims(void);
